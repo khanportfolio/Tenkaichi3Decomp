@@ -145,11 +145,18 @@ s32 Progress_Main(s32 arg) {
             {
                 extern s32 Movie_PlayTitle(void);
                 extern s32 gPortTitleAuto;
+                s32 played;
+
                 PadWatch_SetEnabled(0);
-                if (Movie_PlayTitle()) {
-                    gPortTitleAuto = 2; /* START was pressed there: the menu comes up at once */
-                }
+                played = Movie_PlayTitle();
                 PadWatch_SetEnabled(1);
+                if (played && (gProgress->flags & MPROG_SAVE_LOADED)) {
+                    gProgress->mode = 4; /* the movie is the press-start screen: on to the main menu */
+                    break;
+                }
+                if (played) {
+                    gPortTitleAuto = 2; /* no save: the title's New Game, at once */
+                }
             }
 #endif
             Bgm_Play(MENU_BGM_TITLE);
