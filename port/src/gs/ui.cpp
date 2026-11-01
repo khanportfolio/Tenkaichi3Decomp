@@ -2182,6 +2182,24 @@ static void movie_upload(SDL_GPUCommandBuffer *cmd) {
     sMovieShow = sMovieHave;
 }
 
+// A story line at the start of a fight (story_talk.txt, plat_movie.c): low in the picture, on a dark band.
+extern "C" int Port_StoryText(char *out, int size);
+static char sStoryLine[280];
+
+static void story_draw(void) {
+    ImGuiIO &io = ImGui::GetIO();
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    float size = io.DisplaySize.y / 26.0f;
+    float wrap = io.DisplaySize.x * 0.8f;
+    ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, wrap, sStoryLine);
+    float x = (io.DisplaySize.x - extent.x) * 0.5f, y = io.DisplaySize.y * 0.82f;
+    float pad = size * 0.5f;
+
+    dl->AddRectFilled(ImVec2(x - pad, y - pad), ImVec2(x + extent.x + pad, y + extent.y + pad), IM_COL32(0, 0, 0, 170), pad * 0.5f);
+    dl->AddText(font, size, ImVec2(x, y), IM_COL32(255, 255, 255, 255), sStoryLine, NULL, wrap);
+}
+
 // The whole window black, the picture in its own shape in the middle of it.
 static void movie_draw(void) {
     ImGuiIO &io = ImGui::GetIO();
@@ -2664,7 +2682,8 @@ static bool frame_build(void) {
     bool saving = save_icon_on(now) && sReady && gUiPresentW > 0 && gUiPresentH > 0;
     meter_count();
     sBuilt = false;
-    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving && !sMovieShow)) {
+    bool story = sReady && Port_StoryText(sStoryLine, (int)sizeof(sStoryLine));
+    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving && !sMovieShow && !story)) {
         return false;
     }
     if (sPadHold && sCapKind != 2) { // a binding was taken: the controller works the window again once nothing is held
@@ -2705,6 +2724,9 @@ static bool frame_build(void) {
     }
     if (sMovieShow) {
         movie_draw();
+    }
+    if (story) {
+        story_draw();
     }
     if (bars) {
         bars_draw();

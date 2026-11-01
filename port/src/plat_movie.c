@@ -171,3 +171,159 @@ int sceMpegGetPicture(void *mp, void *rgb, int blocks) {
     }
     return 0;
 }
+
+
+/*
+ * Story lines at the start of a fight, from the file story_talk.txt next to the game (the player's own text):
+ *     group Name 0-11 198          a name for a set of character numbers
+ *     Name|Other|Name's line|Other's line
+ * The game's voice line plays as always; the text is shown over it (gs/ui.cpp). Not in an online session.
+ */
+#define STORY_GROUPS 96
+#define STORY_RANGES 8
+#define STORY_PAIRS 1024
+#define STORY_TEXT 240
+typedef struct { char name[24]; int count, lo[STORY_RANGES], hi[STORY_RANGES]; } StoryGroup;
+typedef struct { int a, b; char lineA[STORY_TEXT], lineB[STORY_TEXT]; } StoryPair;
+static StoryGroup *sStoryGroups;
+static StoryPair *sStoryPairs;
+static int sStoryGroupCount, sStoryPairCount, sStoryLoaded;
+static char sStoryNow[STORY_TEXT + 32];
+static pthread_mutex_t sStoryLock = PTHREAD_MUTEX_INITIALIZER;
+
+static int story_find(const char *name) {
+    int i;
+    for (i = 0; i < sStoryGroupCount; i++) {
+        if (strcmp(sStoryGroups[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void story_group(char *line) {
+    StoryGroup *g;
+    char *tok = strtok(line, " \t\r\n");
+
+    if (tok == NULL || sStoryGroupCount >= STORY_GROUPS) {
+        return;
+    }
+    g = &sStoryGroups[sStoryGroupCount++];
+    memset(g, 0, sizeof(*g));
+    snprintf(g->name, sizeof(g->name), "%s", tok);
+    while ((tok = strtok(NULL, " \t\r\n")) != NULL && g->count < STORY_RANGES) {
+        char *dash = strchr(tok, '-');
+        g->lo[g->count] = atoi(tok);
+        g->hi[g->count] = dash != NULL ? atoi(dash + 1) : g->lo[g->count];
+        g->count++;
+    }
+}
+
+static void story_pair(char *line) {
+    char *f[4];
+    int i;
+    StoryPair *p;
+
+    f[0] = line;
+    for (i = 1; i < 4; i++) {
+        f[i] = strchr(f[i - 1], '|');
+        if (f[i] == NULL) {
+            return;
+        }
+        *f[i]++ = '\0';
+    }
+    f[3][strcspn(f[3], "\r\n")] = '\0';
+    if (sStoryPairCount >= STORY_PAIRS || story_find(f[0]) < 0 || story_find(f[1]) < 0) {
+        return;
+    }
+    p = &sStoryPairs[sStoryPairCount++];
+    p->a = story_find(f[0]);
+    p->b = story_find(f[1]);
+    snprintf(p->lineA, sizeof(p->lineA), "%s", f[2]);
+    snprintf(p->lineB, sizeof(p->lineB), "%s", f[3]);
+}
+
+static void story_load(void) {
+    char line[640];
+    FILE *fp;
+
+    sStoryLoaded = 1;
+    fp = fopen("story_talk.txt", "r");
+    if (fp == NULL) {
+        return;
+    }
+    sStoryGroups = calloc(STORY_GROUPS, sizeof(StoryGroup));
+    sStoryPairs = calloc(STORY_PAIRS, sizeof(StoryPair));
+    if (sStoryGroups != NULL && sStoryPairs != NULL) {
+        while (fgets(line, sizeof(line), fp) != NULL) {
+            if (strncmp(line, "group ", 6) == 0) {
+                story_group(line + 6);
+            } else if (line[0] != '#' && strchr(line, '|') != NULL) {
+                story_pair(line);
+            }
+        }
+    }
+    fclose(fp);
+    fprintf(stderr, "bt3: story talk: %d groups, %d pairs\n", sStoryGroupCount, sStoryPairCount);
+}
+
+static int story_group_of(int chara) {
+    int i, r;
+    for (i = 0; i < sStoryGroupCount; i++) {
+        for (r = 0; r < sStoryGroups[i].count; r++) {
+            if (chara >= sStoryGroups[i].lo[r] && chara <= sStoryGroups[i].hi[r]) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+void Port_StoryTalkClear(void) {
+    pthread_mutex_lock(&sStoryLock);
+    sStoryNow[0] = '\0';
+    pthread_mutex_unlock(&sStoryLock);
+}
+
+/* `speaker` starts speaking to `other`: their pair's line, if the file has one, is shown until the next call. */
+void Port_StoryTalkSay(int speaker, int other) {
+    const char *text = NULL;
+    int a, b, i;
+
+    Port_StoryTalkClear();
+    if (Port_NetSession()) {
+        return;
+    }
+    if (!sStoryLoaded) {
+        story_load();
+    }
+    a = story_group_of(speaker);
+    b = story_group_of(other);
+    if (a < 0 || b < 0) {
+        return;
+    }
+    for (i = 0; i < sStoryPairCount && text == NULL; i++) {
+        if (sStoryPairs[i].a == a && sStoryPairs[i].b == b) {
+            text = sStoryPairs[i].lineA;
+        } else if (sStoryPairs[i].a == b && sStoryPairs[i].b == a) {
+            text = sStoryPairs[i].lineB;
+        }
+    }
+    if (text != NULL) {
+        pthread_mutex_lock(&sStoryLock);
+        snprintf(sStoryNow, sizeof(sStoryNow), "%s: %s", sStoryGroups[a].name, text);
+        pthread_mutex_unlock(&sStoryLock);
+    }
+}
+
+int Port_StoryText(char *out, int size) {
+    int on;
+
+    pthread_mutex_lock(&sStoryLock);
+    on = sStoryNow[0] != '\0';
+    if (on) {
+        snprintf(out, (size_t)size, "%s", sStoryNow);
+    }
+    pthread_mutex_unlock(&sStoryLock);
+    return on;
+}

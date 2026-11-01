@@ -806,8 +806,16 @@ s32 BtlSeq_GetTimeLeft(void) {
     return BtlSeq_GetClock()->timeLeft;
 }
 
+#ifdef PORT
+extern void Port_StoryTalkSay(int speaker, int other); /* plat_movie.c */
+extern void Port_StoryTalkClear(void);
+#endif
+
 /* Stops both fighters' talk animation and both voice players. */
 void BtlSeq_StopTalk(void) {
+#ifdef PORT
+    Port_StoryTalkClear();
+#endif
     BtlObj_SetSubState(BtlObj_Get(BattleSide_GetObjId(0)), 0, -1);
     BtlObj_SetSubState(BtlObj_Get(BattleSide_GetObjId(1)), 0, -1);
     Voice_Stop(0);
@@ -881,6 +889,9 @@ s32 BtlSeqIntroTalk_PreUpdate(BtlSeqTalkCtx *ctx) {
         Ramp_Start(&ctx->timer, 10.0f, 0.0f, 1.0f);
         DemoCam_PlayObjAnim(ctx->side[0], 0);
         Voice_PlayChara(ctx->side[0], ctx->chara[0], ctx->line[0]);
+#ifdef PORT
+        Port_StoryTalkSay(ctx->chara[0], ctx->chara[1]);
+#endif
         BtlObj_SetSubState(BtlObj_Get(BattleSide_GetObjId(ctx->side[0])), 2, ctx->line[0]);
         ctx->step++;
         break;
@@ -889,6 +900,9 @@ s32 BtlSeqIntroTalk_PreUpdate(BtlSeqTalkCtx *ctx) {
         Ramp_Start(&ctx->timer, 10.0f, 0.0f, 1.0f);
         DemoCam_PlayObjAnim(ctx->side[1], 0);
         Voice_PlayChara(ctx->side[1], ctx->chara[1], ctx->line[1]);
+#ifdef PORT
+        Port_StoryTalkSay(ctx->chara[1], ctx->chara[0]);
+#endif
         BtlObj_SetSubState(BtlObj_Get(BattleSide_GetObjId(ctx->side[1])), 2, ctx->line[1]);
         ctx->step++;
         break;
@@ -954,6 +968,9 @@ done:
 
 /* State 1 exit: stops the camera cut and ends both entrance poses (not in mode 1). */
 s32 BtlSeqIntroTalk_Exit(BtlSeqTalkCtx *ctx) {
+#ifdef PORT
+    Port_StoryTalkClear();
+#endif
     if (Battle_GetMode() != 1) {
         DemoCam_Stop();
         BtlCtrl_EndEntrance(ctx->side[0]);
