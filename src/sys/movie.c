@@ -246,9 +246,17 @@ void Movie_Close(void) {
     }
 }
 
+#ifdef PORT
+/* Pictures of the next movie that START cannot skip (30 a second). */
+static s32 sMovieNoSkip;
+#endif
+
 /* Plays the opening movie from start to end (or until it is skipped). */
 void Movie_PlayOpening(void) {
     Movie_Open("zs3usop.pss", "zs3usop.adx");
+#ifdef PORT
+    sMovieNoSkip = 180; /* its first 6 seconds */
+#endif
     Movie_Run();
     Movie_Close();
 }
@@ -266,6 +274,11 @@ void Movie_Run(void) {
     sceMpeg *mp;
     s32 wait = 0;
     s32 skip = 0;
+#ifdef PORT
+    s32 noSkip = sMovieNoSkip;
+
+    sMovieNoSkip = 0;
+#endif
 
     gMovieRunCount++;
     m = gMovie;
@@ -294,6 +307,10 @@ void Movie_Run(void) {
                 }
                 wait++;
             }
+#ifdef PORT
+        } else if (noSkip > 0) {
+            noSkip--;
+#endif
         } else if (gPad[0].gamePressed & MOVIE_SKIP_BUTTON) {
             Fade_Start(0, FADE_OUT, 0.5f);
             skip = 1;
