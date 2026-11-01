@@ -141,7 +141,8 @@ int PortInput_Hotkey(const SDL_Event *ev) {
         return 0;
     }
     if (ev->type == SDL_EVENT_KEY_DOWN && !ev->key.repeat) {
-        return sOverlayKey > 0 && (int)ev->key.scancode == sOverlayKey;
+        return (sOverlayKey > 0 && (int)ev->key.scancode == sOverlayKey) ||
+               (ev->key.scancode == SDL_SCANCODE_O && (ev->key.mod & SDL_KMOD_SHIFT));
     }
     if (ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         SDL_Gamepad *g = SDL_GetGamepadFromID(ev->gbutton.which);
