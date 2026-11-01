@@ -141,6 +141,17 @@ s32 Progress_Main(s32 arg) {
             gProgress->mode = 1;
             break;
         case 1:
+#ifdef PORT
+            {
+                extern s32 Movie_PlayTitle(void);
+                extern s32 gPortTitleAuto;
+                PadWatch_SetEnabled(0);
+                if (Movie_PlayTitle()) {
+                    gPortTitleAuto = 2; /* START was pressed there: the menu comes up at once */
+                }
+                PadWatch_SetEnabled(1);
+            }
+#endif
             Bgm_Play(MENU_BGM_TITLE);
             ret = Title_Run(1);
             Adx_StopAll();

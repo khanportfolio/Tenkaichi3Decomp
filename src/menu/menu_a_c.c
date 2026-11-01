@@ -208,11 +208,21 @@ void Title_OnCardCancel(void) {
     Title_ClipGoto(0, 2, "fl_on_start");
 }
 
+#ifdef PORT
+s32 gPortTitleAuto; /* presses of START still to make for the player (Movie_PlayTitle) */
+#endif
+
 /* Pad 0: start skips the intro and opens the menu; up / down, confirm, or quit from the menu on PC. */
 void Title_Input(s32 *result) {
 #ifdef PORT
     if (gPortOverlayOpen) {
         return;
+    }
+#endif
+#ifdef PORT
+    if (gPortTitleAuto > 0 && (gTitle->state == 0 || (gTitle->state == 1 && (gTitle->flash[0].flags & MFLASH_PAD) && (gTitle->flags & TITLE_STARTED)))) {
+        gPortTitleAuto--;
+        gPad[0].gamePressed |= 0x1000;
     }
 #endif
     if (gTitle->state == 0) {

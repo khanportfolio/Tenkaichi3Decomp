@@ -249,6 +249,7 @@ void Movie_Close(void) {
 #ifdef PORT
 /* Pictures of the next movie that START cannot skip (30 a second). */
 static s32 sMovieNoSkip;
+static s32 sMovieSkipped; /* START ended the movie that just played */
 #endif
 
 /* Plays the opening movie from start to end (or until it is skipped). */
@@ -260,6 +261,28 @@ void Movie_PlayOpening(void) {
     Movie_Run();
     Movie_Close();
 }
+
+#ifdef PORT
+extern int Port_FilePath(int ptid, int flid, const char *fname, char *out, int size);
+extern int GsGpu_Enabled(void);
+
+/* The press-start screen as a movie of its own (mods/disc/DATA/ZS3USTL.PSS and .ADX): played again and again until
+   START. 0 when there is no such movie (or no window): the game's own screen is shown instead. */
+s32 Movie_PlayTitle(void) {
+    char path[512];
+
+    if (!GsGpu_Enabled() || !Port_FilePath(0, 0, "ZS3USTL.PSS", path, sizeof(path))) {
+        return 0;
+    }
+    do {
+        sMovieSkipped = 0;
+        Movie_Open("zs3ustl.pss", "zs3ustl.adx");
+        Movie_Run();
+        Movie_Close();
+    } while (!sMovieSkipped);
+    return 1;
+}
+#endif
 
 /* Plays the ending movie. */
 void Movie_PlayEnding(void) {
@@ -312,6 +335,9 @@ void Movie_Run(void) {
             noSkip--;
 #endif
         } else if (gPad[0].gamePressed & MOVIE_SKIP_BUTTON) {
+#ifdef PORT
+            sMovieSkipped = 1;
+#endif
             Fade_Start(0, FADE_OUT, 0.5f);
             skip = 1;
         }
