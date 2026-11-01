@@ -11,6 +11,7 @@
  * movie ends at once, except when recorded input is played back (the movie has to take the same number of frames).
  */
 extern int Port_NetSession(void); /* gs/net.c: no movies in an online session */
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +25,8 @@ extern int GsGpu_Enabled(void);
 
 typedef struct Mpeg2 Mpeg2;
 extern Mpeg2 *Mpeg2_Open(const char *path);
-extern int Mpeg2_Next(Mpeg2 *m, uint8_t *rgba);
+extern int Mpeg2_Decode(Mpeg2 *m);
+extern void Mpeg2_Rgba(Mpeg2 *m, uint8_t *rgba);
 extern int Mpeg2_Width(const Mpeg2 *m);
 extern int Mpeg2_Height(const Mpeg2 *m);
 extern void Mpeg2_Close(Mpeg2 *m);
@@ -33,7 +35,73 @@ static Mpeg2 *sMovie;
 static int sStarted, sEnd;
 static uint8_t sFrame[MOVIE_W * MOVIE_H * 4];
 
+/* A movie of another size than the disc's (a player's own, mods/disc/DATA): its pictures do not fit the game's 512 x
+   448 path, so the game is given black and the settings window's layer draws the picture over it at its own size
+   (gs/ui.cpp). The newest picture is sBigShown; the next is made in sBigNext and the two change places. */
+#define MOVIE_BIG_MAX_W 3840
+#define MOVIE_BIG_MAX_H 2160
+static uint8_t *sBigShown, *sBigNext;
+static int sBigW, sBigH, sBigOn;
+static unsigned sBigSeq;
+static pthread_mutex_t sBigLock = PTHREAD_MUTEX_INITIALIZER;
+
+/* The newest big picture, with the lock held (Port_MovieBigDone lets it go), or NULL when there is none. */
+const uint8_t *Port_MovieBig(int *w, int *h, unsigned *seq) {
+    pthread_mutex_lock(&sBigLock);
+    if (!sBigOn || sBigShown == NULL) {
+        pthread_mutex_unlock(&sBigLock);
+        return NULL;
+    }
+    *w = sBigW;
+    *h = sBigH;
+    *seq = sBigSeq;
+    return sBigShown;
+}
+
+void Port_MovieBigDone(void) {
+    pthread_mutex_unlock(&sBigLock);
+}
+
+static int big_picture(void *rgb, int blocks) {
+    int w = Mpeg2_Width(sMovie), h = Mpeg2_Height(sMovie);
+    size_t bytes = (size_t)w * h * 4;
+    uint8_t *swap;
+
+    if (w <= 0 || h <= 0 || w > MOVIE_BIG_MAX_W || h > MOVIE_BIG_MAX_H) {
+        sEnd = 1;
+        return -1;
+    }
+    if (w != sBigW || h != sBigH || sBigNext == NULL || sBigShown == NULL) {
+        pthread_mutex_lock(&sBigLock);
+        free(sBigShown);
+        free(sBigNext);
+        sBigShown = malloc(bytes);
+        sBigNext = malloc(bytes);
+        sBigW = w;
+        sBigH = h;
+        sBigOn = 0;
+        pthread_mutex_unlock(&sBigLock);
+        if (sBigShown == NULL || sBigNext == NULL) {
+            sEnd = 1;
+            return -1;
+        }
+    }
+    Mpeg2_Rgba(sMovie, sBigNext);
+    pthread_mutex_lock(&sBigLock);
+    swap = sBigShown;
+    sBigShown = sBigNext;
+    sBigNext = swap;
+    sBigOn = 1;
+    sBigSeq++;
+    pthread_mutex_unlock(&sBigLock);
+    memset(rgb, 0, (size_t)blocks * 0x400);
+    return 0;
+}
+
 static void movie_close(void) {
+    pthread_mutex_lock(&sBigLock);
+    sBigOn = 0;
+    pthread_mutex_unlock(&sBigLock);
     if (sMovie != NULL) {
         Mpeg2_Close(sMovie);
         sMovie = NULL;
@@ -79,10 +147,14 @@ int sceMpegGetPicture(void *mp, void *rgb, int blocks) {
     if (!sStarted) {
         movie_start();
     }
-    if (sMovie == NULL || !Mpeg2_Next(sMovie, sFrame) || Mpeg2_Width(sMovie) != MOVIE_W || Mpeg2_Height(sMovie) != MOVIE_H) {
+    if (sMovie == NULL || !Mpeg2_Decode(sMovie)) {
         sEnd = 1;
         return -1;
     }
+    if (Mpeg2_Width(sMovie) != MOVIE_W || Mpeg2_Height(sMovie) != MOVIE_H) {
+        return big_picture(rgb, blocks);
+    }
+    Mpeg2_Rgba(sMovie, sFrame);
     for (i = 0; i < cols; i++) {
         for (j = 0; j < rows && i * rows + j < blocks; j++) {
             uint8_t *b = out + (size_t)(i * rows + j) * 0x400;

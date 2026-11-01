@@ -606,12 +606,15 @@ static int next_planes(Mpeg2 *m) {
     return m->y != NULL;
 }
 
-int Mpeg2_Next(Mpeg2 *m, uint8_t *rgba) {
+/* The next picture into the decoder's own planes: Mpeg2_Width and Mpeg2_Height are known from here. 0 at the end. */
+int Mpeg2_Decode(Mpeg2 *m) {
+    return next_planes(m);
+}
+
+/* The picture Mpeg2_Decode left, into width * height * 4 bytes. */
+void Mpeg2_Rgba(Mpeg2 *m, uint8_t *rgba) {
     int x, y, w, h, stride;
 
-    if (!next_planes(m)) {
-        return 0;
-    }
     w = m->width;
     h = m->height;
     stride = m->mbw * 16;
@@ -628,6 +631,13 @@ int Mpeg2_Next(Mpeg2 *m, uint8_t *rgba) {
             o[x * 4 + 3] = 255;
         }
     }
+}
+
+int Mpeg2_Next(Mpeg2 *m, uint8_t *rgba) {
+    if (!next_planes(m)) {
+        return 0;
+    }
+    Mpeg2_Rgba(m, rgba);
     return 1;
 }
 

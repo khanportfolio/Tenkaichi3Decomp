@@ -2104,6 +2104,100 @@ static void build(void) {
 
 static bool sBuilt; // this frame has something to draw: the window, or the line over the picture
 
+// A movie larger than the game's 512 x 448 (plat_movie.c): shown here, on this layer, at its own size.
+extern "C" const uint8_t *Port_MovieBig(int *w, int *h, unsigned *seq);
+extern "C" void Port_MovieBigDone(void);
+static SDL_GPUTexture *sMovieTex;
+static SDL_GPUTransferBuffer *sMovieTb;
+static int sMovieW, sMovieH;
+static unsigned sMovieSeq;
+static bool sMovieHave, sMovieShow;
+
+static void movie_upload(SDL_GPUCommandBuffer *cmd) {
+    int w = 0, h = 0;
+    unsigned seq = 0;
+    const uint8_t *px = Port_MovieBig(&w, &h, &seq);
+
+    sMovieShow = false;
+    if (px == NULL) {
+        return;
+    }
+    Uint32 bytes = (Uint32)w * (Uint32)h * 4;
+    if (sMovieTex == NULL || w != sMovieW || h != sMovieH) {
+        SDL_GPUTextureCreateInfo ci;
+        SDL_GPUTransferBufferCreateInfo tbi;
+
+        if (sMovieTex != NULL) {
+            SDL_ReleaseGPUTexture(sDevice, sMovieTex);
+        }
+        if (sMovieTb != NULL) {
+            SDL_ReleaseGPUTransferBuffer(sDevice, sMovieTb);
+        }
+        SDL_zero(ci);
+        ci.type = SDL_GPU_TEXTURETYPE_2D;
+        ci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        ci.width = (Uint32)w;
+        ci.height = (Uint32)h;
+        ci.layer_count_or_depth = 1;
+        ci.num_levels = 1;
+        ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        sMovieTex = SDL_CreateGPUTexture(sDevice, &ci);
+        SDL_zero(tbi);
+        tbi.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        tbi.size = bytes;
+        sMovieTb = SDL_CreateGPUTransferBuffer(sDevice, &tbi);
+        sMovieW = w;
+        sMovieH = h;
+        sMovieHave = false;
+    }
+    if (sMovieTex == NULL || sMovieTb == NULL) {
+        Port_MovieBigDone();
+        return;
+    }
+    if (!sMovieHave || seq != sMovieSeq) {
+        void *map = SDL_MapGPUTransferBuffer(sDevice, sMovieTb, true);
+        if (map != NULL) {
+            SDL_GPUTextureTransferInfo src;
+            SDL_GPUTextureRegion dst;
+
+            memcpy(map, px, bytes);
+            SDL_UnmapGPUTransferBuffer(sDevice, sMovieTb);
+            SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+            SDL_zero(src);
+            src.transfer_buffer = sMovieTb;
+            src.pixels_per_row = (Uint32)w;
+            src.rows_per_layer = (Uint32)h;
+            SDL_zero(dst);
+            dst.texture = sMovieTex;
+            dst.w = (Uint32)w;
+            dst.h = (Uint32)h;
+            dst.d = 1;
+            SDL_UploadToGPUTexture(cp, &src, &dst, true);
+            SDL_EndGPUCopyPass(cp);
+            sMovieSeq = seq;
+            sMovieHave = true;
+        }
+    }
+    Port_MovieBigDone();
+    sMovieShow = sMovieHave;
+}
+
+// The whole window black, the picture in its own shape in the middle of it.
+static void movie_draw(void) {
+    ImGuiIO &io = ImGui::GetIO();
+    ImDrawList *dl = ImGui::GetBackgroundDrawList();
+    float sw = io.DisplaySize.x, sh = io.DisplaySize.y;
+    float dh = sh, dw = dh * (float)sMovieW / (float)sMovieH;
+
+    if (dw > sw) {
+        dw = sw;
+        dh = dw * (float)sMovieH / (float)sMovieW;
+    }
+    dl->AddRectFilled(ImVec2(0.0f, 0.0f), ImVec2(sw, sh), IM_COL32(0, 0, 0, 255));
+    dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)sMovieTex), ImVec2((sw - dw) * 0.5f, (sh - dh) * 0.5f),
+                 ImVec2((sw + dw) * 0.5f, (sh + dh) * 0.5f));
+}
+
 void Ui_DrawAgain(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *target) {
     ImDrawData *dd = sReady && sBuilt ? ImGui::GetDrawData() : NULL; // (sBuilt: Ui_Draw made a picture this frame)
     SDL_GPUColorTargetInfo ti;
@@ -2570,7 +2664,7 @@ static bool frame_build(void) {
     bool saving = save_icon_on(now) && sReady && gUiPresentW > 0 && gUiPresentH > 0;
     meter_count();
     sBuilt = false;
-    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving)) {
+    if (!sReady || (!sOpen && !sQuit && !notice && !overlay && !meter && !names && !bars && !chat && !banner && !saving && !sMovieShow)) {
         return false;
     }
     if (sPadHold && sCapKind != 2) { // a binding was taken: the controller works the window again once nothing is held
@@ -2608,6 +2702,9 @@ static bool frame_build(void) {
     // hide_pointer, on unless 0). The SDL back end hides it for this cursor at the next frame.
     if (!sOpen && !sQuit && !sChat && Port_Setting("hide_pointer", 1) != 0) {
         ImGui::SetMouseCursor(ImGuiMouseCursor_None);
+    }
+    if (sMovieShow) {
+        movie_draw();
     }
     if (bars) {
         bars_draw();
@@ -2768,6 +2865,9 @@ static bool frame_build(void) {
 }
 
 void Ui_Draw(SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *target) {
+    if (!sGL) {
+        movie_upload(cmd);
+    }
     if (!sGL && frame_build()) {
         Ui_DrawAgain(cmd, target);
     }
