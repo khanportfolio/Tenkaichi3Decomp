@@ -4347,11 +4347,37 @@ static void interp_cost(uint64_t ns) {
 
 /* Shows picture `step` of the tick's sInterpSteps: the list replayed `step / steps` of the way from the previous
    tick; the last one is the tick itself. The recorded list has to be in place (interp_counts_restore). */
+/* BT3_GS_VERBOSE: where smooth motion's time goes, summed over 60 ticks (interp_prof_report). The parts: deciding
+   (signatures, pieces, the first build), building an in-between picture (the view, the corners, the wall),
+   showing it, showing the tick's real picture, keeping the copy for the next tick, and the pacing waits between
+   pictures (SDL_DelayPrecise: waiting on purpose, not work). */
+enum { IP_DECIDE, IP_BUILD, IP_SHOW_B, IP_SHOW_R, IP_REMEMBER, IP_PACE, IP_COUNT };
+static uint64_t sInterpProf[IP_COUNT];
+static unsigned sInterpProfShown;
+
+static void interp_prof_report(void) {
+    static unsigned ticks;
+    if (++ticks < 60) {
+        return;
+    }
+    ticks = 0;
+    if (getenv("BT3_GS_VERBOSE") != NULL) {
+        fprintf(stderr, "time:   smooth motion per tick: deciding %.2f ms, building %.2f, showing in-between %.2f, showing real %.2f, keeping %.2f, "
+                        "pacing waits %.2f; %.2f in-between pictures a tick\n",
+                (double)sInterpProf[IP_DECIDE] / 60e6, (double)sInterpProf[IP_BUILD] / 60e6, (double)sInterpProf[IP_SHOW_B] / 60e6,
+                (double)sInterpProf[IP_SHOW_R] / 60e6, (double)sInterpProf[IP_REMEMBER] / 60e6, (double)sInterpProf[IP_PACE] / 60e6,
+                (double)sInterpProfShown / 60.0);
+    }
+    memset(sInterpProf, 0, sizeof(sInterpProf));
+    sInterpProfShown = 0;
+}
+
 static void interp_show(int step) {
     if (step < sInterpSteps) {
         Vu0Uniform *real = gsVuUni;
         Vtx *realVerts = gsVerts;
         float t = env_once("BT3_INTERP_T") != NULL ? (float)atof(env_once("BT3_INTERP_T")) : (float)step / (float)sInterpSteps;
+        uint64_t tb = gpu_now();
 
         if (step > 1) {
             interp_build(t, 0); /* (the first was built to decide whether the tick can be blended at all) */
@@ -4365,9 +4391,12 @@ static void interp_show(int step) {
             gsVerts = sInterpBlendVerts;
         }
         gsVuUni = sInterpBlend;
+        sInterpProf[IP_BUILD] += gpu_now() - tb;
+        sInterpProfShown++;
         if (env_once("BT3_INTERP_REALONLY") == NULL) { /* (testing: only the ticks' real pictures are shown, numbered as without in-between pictures) */
             uint64_t t0 = gpu_now();
             sBackend->frameEnd();
+            sInterpProf[IP_SHOW_B] += gpu_now() - t0;
             interp_cost(gpu_now() - t0);
         } else {
             gsVertCount = gsVuVertCount = gsVuIdxCount = gsVuUniCount = gsDrawCount = 0; /* (as the back end leaves them) */
@@ -4378,13 +4407,17 @@ static void interp_show(int step) {
         interp_present_log('B');
         gInterpShown++;
     } else {
+        uint64_t tk = gpu_now();
         interp_remember(); /* (only now: the in-between pictures were built from the previous tick's copy) */
+        sInterpProf[IP_REMEMBER] += gpu_now() - tk;
         interp_wall_real();
         {
             uint64_t t0 = gpu_now();
             sBackend->frameEnd();
+            sInterpProf[IP_SHOW_R] += gpu_now() - t0;
             interp_cost(gpu_now() - t0);
         }
+        interp_prof_report();
         interp_wall_restore();
         interp_present_log('R');
         scale_apply();
@@ -4432,6 +4465,7 @@ void GsGpu_InterpPump(int ahead_ms, int all) {
             }
             if (now < due) {
                 SDL_DelayPrecise(due - now);
+                sInterpProf[IP_PACE] += gpu_now() - now;
             }
         }
         if (sInterpNext == sInterpSteps && env_once("BT3_INTERP_ONLY") != NULL) {
@@ -4554,11 +4588,15 @@ void GsGpu_FrameEnd(void) {
             sInterpSteps = (interp_steps() < sInterpCap ? interp_steps() : sInterpCap) * (int)blanks / 2;
             sInterpTickNs = (uint64_t)blanks * Port_BlankNs();
         }
+        uint64_t td = gpu_now();
+        int blend;
         if (gsInterp > 0) {
             interp_signatures(sInterpSig);
             sInterpPrimCount = interp_prims(sInterpPrims);
         }
-        if (gsInterp > 0 && sInterpSteps > 1 && interp_build(env_once("BT3_INTERP_T") != NULL ? (float)atof(env_once("BT3_INTERP_T")) : 1.0f / (float)sInterpSteps, 1)) {
+        blend = gsInterp > 0 && sInterpSteps > 1 && interp_build(env_once("BT3_INTERP_T") != NULL ? (float)atof(env_once("BT3_INTERP_T")) : 1.0f / (float)sInterpSteps, 1);
+        sInterpProf[IP_DECIDE] += gpu_now() - td;
+        if (blend) {
             uint64_t before;
 
             sInterpSaved.verts = gsVertCount;
@@ -4593,14 +4631,19 @@ void GsGpu_FrameEnd(void) {
                 gInterpPaired = gInterpUnpaired = gInterpCamera = gInterpTris = gInterpTrisBlended = 0;
             }
         } else {
-            uint64_t t1;
+            uint64_t t1 = gpu_now();
             if (gsInterp > 0) {
                 interp_remember();
                 gInterpSkipped++;
             }
+            sInterpProf[IP_REMEMBER] += gpu_now() - t1;
             t1 = gpu_now();
             sBackend->frameEnd();
+            sInterpProf[IP_SHOW_R] += gpu_now() - t1;
             interp_cost(gpu_now() - t1);
+            if (gsInterp > 0) {
+                interp_prof_report();
+            }
             interp_present_log('S');
             scale_apply();
             menu_labels_apply();
