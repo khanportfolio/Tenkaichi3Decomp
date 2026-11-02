@@ -451,6 +451,15 @@ static int vk_init(void) {
            bar once widescreen drew the HUD narrower and the smaller copies came into use). */
         si.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
         si.max_lod = (i & 8) ? 16.0f : 0.0f;
+        /* Anisotropic filtering on the same 3D textures, as newer games use: the ground seen at a low angle stays
+           sharp instead of blurring with distance. `aniso` in the settings file: 1..16, 1 = off (default 16). */
+        if ((i & 8) && (i & 1)) {
+            int aniso = Port_Setting("aniso", 16);
+            if (aniso > 1) {
+                si.enable_anisotropy = true;
+                si.max_anisotropy = (float)(aniso > 16 ? 16 : aniso);
+            }
+        }
         si.address_mode_u = (i & 2) ? SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE : SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
         si.address_mode_v = (i & 4) ? SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE : SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
         si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
