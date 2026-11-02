@@ -127,6 +127,10 @@ extern u32 BtlSuper_GetFlags(HitChr *chr, s32 tech);                 /* techniqu
 extern s32 BtlSkill_GetFrames(HitChr *chr, s32 dir);
 
 /* Model objects and maths. */
+#ifdef PORT
+extern s32 BtlCharApi_GetChara(s32 objId);
+extern int Port_OmniDamage(int attacker, int defender, int damage); /* plat_charas.c */
+#endif
 extern f32 BtlCharApi_GetHeight(s32 objId);                             /* body size, obj + 0xFF4 */
 extern f32 BtlCharApi_GetRadius(s32 objId);                             /* body radius */
 extern void BtlCharApi_GetNodePos(s32 objId, s32 node, Vec4 *out);       /* world position of a model node */
@@ -1349,7 +1353,11 @@ void BtlHit_ApplyHit(HitChr *atk) {
     case 0x14:
     case 0x16:
     case 0x25:
+#ifdef PORT
+        def->react.damage = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), BtlAtk_GetDamage(atk));
+#else
         def->react.damage = BtlAtk_GetDamage(atk);
+#endif
         break;
     default: {
         s32 type = 0;
@@ -1381,6 +1389,9 @@ void BtlHit_ApplyHit(HitChr *atk) {
             type = 0x200000 + atk->unkE0C;
             break;
         }
+#ifdef PORT
+        dmg = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), dmg);
+#endif
         BtlMember_Damage(def, dmg, type);
         break;
     }

@@ -809,6 +809,7 @@ s32 BtlSeq_GetTimeLeft(void) {
 #ifdef PORT
 extern void Port_StoryTalkSay(int speaker, int other); /* plat_movie.c */
 extern void Port_StoryTalkClear(void);
+extern int Port_OmniFears(int chara, int other); /* plat_charas.c */
 #endif
 
 /* Stops both fighters' talk animation and both voice players. */
@@ -885,6 +886,11 @@ s32 BtlSeqIntroTalk_Enter(BtlSeqTalkCtx *ctx) {
 s32 BtlSeqIntroTalk_PreUpdate(BtlSeqTalkCtx *ctx) {
     switch (ctx->step) {
     case 0:
+#ifdef PORT
+        if (Port_OmniFears(ctx->chara[0], ctx->chara[1])) {
+            BtlCtrl_StartLosePose(ctx->side[0]); /* before the Omni King everyone but Goku cowers */
+        } else
+#endif
         BtlCtrl_StartEntrance(ctx->side[0]);
         Ramp_Start(&ctx->timer, 10.0f, 0.0f, 1.0f);
         DemoCam_PlayObjAnim(ctx->side[0], 0);
@@ -896,6 +902,11 @@ s32 BtlSeqIntroTalk_PreUpdate(BtlSeqTalkCtx *ctx) {
         ctx->step++;
         break;
     case 2:
+#ifdef PORT
+        if (Port_OmniFears(ctx->chara[1], ctx->chara[0])) {
+            BtlCtrl_StartLosePose(ctx->side[1]);
+        } else
+#endif
         BtlCtrl_StartEntrance(ctx->side[1]);
         Ramp_Start(&ctx->timer, 10.0f, 0.0f, 1.0f);
         DemoCam_PlayObjAnim(ctx->side[1], 0);

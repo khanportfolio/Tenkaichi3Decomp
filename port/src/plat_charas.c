@@ -72,6 +72,7 @@ typedef struct {
     char label[96];            /* the form's label under the name ("Super Saiyan") */
     int labelSet;              /* a label was given (an empty one: no label); without, the base's label */
     int stat[PORT_STAT_COUNT]; /* health, ki, blast stocks: -1 not said */
+    int omni;                  /* omni=1: see Port_OmniDamage */
     int pkg;                   /* its entry in sPkg, or -1 */
     short par[PAR_COUNT];      /* bytes of the parameter block from 0x98 (PAR_*): -1 not said */
     unsigned char freshSet;    /* bits 0..3: `<slot>_fresh` said (bit 4 + k of +0xAD) */
@@ -339,6 +340,8 @@ static void apply(Chara *c, const char *key, const char *value) {
             put(c->shown, sizeof(c->shown), value);
             c->nameSet = 1;
         }
+    } else if (strcmp(key, "omni") == 0) {
+        c->omni = strcmp(value, "1") == 0;
     } else if (strcmp(key, "form") == 0) {
         put(c->label, sizeof(c->label), value);
         c->labelSet = 1;
@@ -1498,6 +1501,33 @@ int Port_CharaStat(int chara, int which, int value) {
     PortCharas_Init();
     c = chara_of(chara);
     return c != NULL && which >= 0 && which < PORT_STAT_COUNT && c->stat[which] >= 0 ? c->stat[which] : value;
+}
+
+/* omni=1 in a manifest, offline: the fighter's hits end any other fighter at once, two of them barely hurt each
+   other, and everyone but Goku cowers at the start of the fight. */
+int Port_CharaOmni(int chara) {
+    const Chara *c;
+    PortCharas_Init();
+    if (Port_NetSession()) {
+        return 0;
+    }
+    c = chara_of(chara);
+    return c != NULL && c->omni;
+}
+
+int Port_OmniDamage(int attacker, int defender, int damage) {
+    if (!Port_CharaOmni(attacker)) {
+        return damage;
+    }
+    if (Port_CharaOmni(defender)) {
+        return damage > 10 ? damage / 10 : damage;
+    }
+    return 1000000;
+}
+
+int Port_OmniFears(int chara, int other) {
+    int base = chara >= PORT_CHARA_FIRST ? Port_CharaBase(chara) : chara;
+    return Port_CharaOmni(other) && !Port_CharaOmni(chara) && !(base >= 0 && base <= 11);
 }
 
 const char *Port_CharaName(int index) {

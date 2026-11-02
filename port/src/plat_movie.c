@@ -285,6 +285,8 @@ void Port_StoryTalkClear(void) {
     pthread_mutex_unlock(&sStoryLock);
 }
 
+extern int Port_CharaOmni(int chara); /* plat_charas.c */
+
 /* `speaker` starts speaking to `other`: their pair's line, if the file has one, is shown until the next call. */
 void Port_StoryTalkSay(int speaker, int other) {
     const char *text = NULL;
@@ -299,6 +301,12 @@ void Port_StoryTalkSay(int speaker, int other) {
     }
     a = story_group_of(speaker);
     b = story_group_of(other);
+    if ((a < 0 || b < 0) && Port_CharaOmni(speaker) != Port_CharaOmni(other)) { /* no pair written: every fighter still knows him */
+        pthread_mutex_lock(&sStoryLock);
+        snprintf(sStoryNow, sizeof(sStoryNow), "%s", Port_CharaOmni(speaker) ? "Zeno: I am the Omni King. Bye bye." : "The Omni King?! Please... not me!");
+        pthread_mutex_unlock(&sStoryLock);
+        return;
+    }
     if (a < 0 || b < 0) {
         return;
     }
