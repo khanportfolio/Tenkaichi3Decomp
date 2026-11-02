@@ -1127,7 +1127,10 @@ static void vk_frame_end(void) {
             params[0] = 1333.333f / (float)Port_PageAspectMilli() / (float)GS_W; /* one PS2 pixel across, as wide as at 4:3 (outline.frag) */
             params[1] = 1.0f / (float)GS_H;
             params[2] = 100.0f / 255.0f; /* the dark rectangle's 0x64 */
-            params[3] = getenv("BT3_FX_DEBUG") != NULL ? 1.0f : 0.0f;
+            {   static int dbg = -1; /* (read once: this runs for every such draw) */
+                if (dbg < 0) { dbg = getenv("BT3_FX_DEBUG") != NULL; }
+                params[3] = dbg ? 1.0f : 0.0f;
+            }
             SDL_PushGPUFragmentUniformData(cmd, 0, params, sizeof(params));
             sc = (SDL_Rect){ d->scissor[0], d->scissor[1], d->scissor[2], d->scissor[3] };
             SDL_SetGPUScissor(pass, &sc);
@@ -1190,7 +1193,9 @@ static void vk_frame_end(void) {
             ct.store_op = SDL_GPU_STOREOP_STORE;
             cts[1] = ct;
             cts[1].texture = sTgAux[d->target];
-            if (getenv("BT3_GPU_MAGENTA") != NULL) { ct.clear_color.r = 1.0f; ct.clear_color.b = 1.0f; ct.clear_color.a = 1.0f; }
+            static int magenta = -1; /* (read once: this runs for every change of target) */
+            if (magenta < 0) { magenta = getenv("BT3_GPU_MAGENTA") != NULL; }
+            if (magenta) { ct.clear_color.r = 1.0f; ct.clear_color.b = 1.0f; ct.clear_color.a = 1.0f; }
             dt.texture = sTgDep[d->target];
             dt.load_op = gsTargets[d->target].cleared ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
             dt.store_op = SDL_GPU_STOREOP_STORE;

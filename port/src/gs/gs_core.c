@@ -630,7 +630,9 @@ static void vertex(uint32_t x, uint32_t y, uint32_t z, int kick) {
     }
     /* BT3_GS_ZDUMP=<frame>: when that frame first draws through the depth tint's table (CLUT 0x3E64), write the
        depth page (512 x 448 words: depth in the low 24 bits, the byte the effects index on top) to zdump.bin */
-    if (kick && type == 6 && gs.vcount == 2 && getenv("BT3_GS_ZDUMP") != NULL && (int)sFrame == atoi(getenv("BT3_GS_ZDUMP")) &&
+    static int zdumpAt = -2; /* (read once: this is asked for every sprite) */
+    if (zdumpAt == -2) { zdumpAt = getenv("BT3_GS_ZDUMP") != NULL ? atoi(getenv("BT3_GS_ZDUMP")) : -1; }
+    if (kick && type == 6 && gs.vcount == 2 && zdumpAt >= 0 && (int)sFrame == zdumpAt &&
         ((gs.tex0[ctx] >> 37) & 0x3FFF) == 0x3E64) {
         static int done;
         if (!done) {

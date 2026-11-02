@@ -52,6 +52,33 @@ extern int gPortMusicPercent, gPortSePercent, gPortVoicePercent, gPortStagePerce
 
 static GsBackend *sBackend;
 
+/* A testing switch, read from the environment once. Many are asked in loops that run for every block, piece and
+   corner of a picture, and getenv walks the whole environment each time (on Windows under a lock): with smooth
+   motion on that was thousands of walks per in-between picture, measured as several ms of each tick. Only for
+   names nothing sets while the game runs (net.c changes the BT3_NET_ ones and a few others, never these). */
+static const char *env_once(const char *name) {
+    static struct { const char *name; const char *value; } seen[64];
+    static int count;
+    int i;
+
+    for (i = 0; i < count; i++) { /* (the same literal is one string in this file: found by its address) */
+        if (seen[i].name == name) {
+            return seen[i].value;
+        }
+    }
+    for (i = 0; i < count; i++) {
+        if (strcmp(seen[i].name, name) == 0) {
+            return seen[i].value;
+        }
+    }
+    if (count == (int)(sizeof(seen) / sizeof(seen[0]))) {
+        return getenv(name);
+    }
+    seen[count].name = name;
+    seen[count].value = getenv(name);
+    return seen[count++].value;
+}
+
 /* The last picture again, with the overlay on it (Port_UiBanner, ui.cpp), and the window's events taken: for the
    game's thread while it waits inside a blank (the start of an online match, gs/net.c), so that the window shows
    something and does not look hung. The frame being recorded is set aside and left as it was for the blank's own
@@ -571,7 +598,7 @@ static GsTex texture_get(int ctx) {
             rw = (uint32_t)mw; rh = (uint32_t)mh;
             menuText = 1;
         }
-        if (getenv("BT3_FONT_LOG") != NULL) { /* what a font setting costs: every decoded texture, and the time the text took */
+        if (env_once("BT3_FONT_LOG") != NULL) { /* what a font setting costs: every decoded texture, and the time the text took */
             fprintf(stderr, "font: frame %u: %ux%u %s %.3f ms\n", gGsFrame, (unsigned)tw, (unsigned)th, text != NULL ? "drawn" : "left",
                     (double)(gpu_now() - font_t0) / 1e6);
         }
@@ -584,11 +611,11 @@ static GsTex texture_get(int ctx) {
         return gsWhite;
     }
     if (!replaced) {
-        if (getenv("BT3_TEX_DUMP") != NULL) { /* every texture as it is decoded, raw RGBA with a small header (looking at the game's art) */
+        if (env_once("BT3_TEX_DUMP") != NULL) { /* every texture as it is decoded, raw RGBA with a small header (looking at the game's art) */
             static unsigned n;
             char name[600];
             FILE *df;
-            snprintf(name, sizeof(name), "%s/tex_%05u_f%06u_%ux%u.rgba", getenv("BT3_TEX_DUMP"), n++, gGsFrame, (unsigned)rw, (unsigned)rh);
+            snprintf(name, sizeof(name), "%s/tex_%05u_f%06u_%ux%u.rgba", env_once("BT3_TEX_DUMP"), n++, gGsFrame, (unsigned)rw, (unsigned)rh);
             df = fopen(name, "wb");
             if (df != NULL) {
                 fwrite(px, 1, (size_t)rw * rh * 4, df);
@@ -1049,7 +1076,7 @@ static int draw_state(int ctx, int topo, int sprite, int vu, GsDraw *d, float *u
     d->mode[0] = !tme ? 0 : d->tex_is_target ? 2 : 1; /* 2: a frame buffer as texture, its alpha is already rescaled */
     /* (BT3_TEX_ALPHA=0 switches the replacement's alpha treatment off, for telling which one a fault comes from) */
     if (d->mode[0] == 1 && sLast != NULL && sLast->tex == d->tex && sLast->replaced == 1 &&
-        !(getenv("BT3_TEX_ALPHA") != NULL && atoi(getenv("BT3_TEX_ALPHA")) == 0)) {
+        !(env_once("BT3_TEX_ALPHA") != NULL && atoi(env_once("BT3_TEX_ALPHA")) == 0)) {
         d->mode[0] = 3; /* a texture pack's replacement: the alpha test allows for its filtered, compressed alpha (gs.frag) */
         d->orig[2] = (float)sLast->amax / 128.0f; /* its alpha is kept at or below the original's largest (1.0 = 0x80) */
     }
@@ -1126,7 +1153,7 @@ void Port_WallMesh(const void *key, int second, int culled, const float *screen,
     if (GS_NO_PICTURE || gsInterp <= 0 || quadCount <= 0 || quadCount > 15) {
         return;
     }
-    if (getenv("BT3_INTERP_WALLLOG") != NULL && atoi(getenv("BT3_INTERP_WALLLOG")) > 2) {
+    if (env_once("BT3_INTERP_WALLLOG") != NULL && atoi(env_once("BT3_INTERP_WALLLOG")) > 2) {
         extern unsigned gPortVBlanks;
         fprintf(stderr, "wall: hook at frame %u blank %u: key %p second %d culled %d m0 %.4f (have %d)\n", gGsFrame, gPortVBlanks, key, second, culled, screen[0], (int)sWallSeq);
     }
@@ -1294,7 +1321,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
            the piece's rectangle of its sheet (gs.frag has the rule for it, another than the replacement's). Off,
            a GS pixel of 2D art is one block of output pixels, as on the console. */
         if ((sSmooth2d && d.tex != gsWhite) ||
-            (sLast != NULL && sLast->tex == d.tex && sLast->replaced && !(getenv("BT3_TEX_2D") != NULL && atoi(getenv("BT3_TEX_2D")) == 0))) {
+            (sLast != NULL && sLast->tex == d.tex && sLast->replaced && !(env_once("BT3_TEX_2D") != NULL && atoi(env_once("BT3_TEX_2D")) == 0))) {
             packed2d = 1; /* its rectangle is worked out below, from the vertices */
         } else {
             d.misc[3] = (float)SCALE;
@@ -1352,7 +1379,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
         /* A replacement follows its piece smoothly whatever "2D filtering" says: sharp means the game's own art as
            blocks of a GS pixel, which a replacement of several texels per GS pixel is not; held to the GS's grid
            its letters stepped one after the other while a piece glided (BT3_TEX_GRID=1: the grid rule, to compare). */
-        d.orig[3] = getenv("BT3_TEX_GRID") != NULL && atoi(getenv("BT3_TEX_GRID")) != 0 ? 0.0f : 1.0f;
+        d.orig[3] = env_once("BT3_TEX_GRID") != NULL && atoi(env_once("BT3_TEX_GRID")) != 0 ? 0.0f : 1.0f;
     }
     if (type == 3 && sWallTex0 != 0 && t0 == sWallTex0) { /* the wall at the edge of the map (Port_WallMesh) */
         d.wall = 1;
@@ -2528,7 +2555,7 @@ static int interp_build_view(float t, int first) {
                     }
                 }
             }
-            if (first && best < 0 && i < 14 && getenv("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_JUMPS"))) {
+            if (first && best < 0 && i < 14 && env_once("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_JUMPS"))) {
                 float nd = 1e30f; int nj = -1, same = 0;
                 for (j2 = 0; j2 < sInterpPrevCount; j2++) {
                     const float *pf = (const float *)&sInterpPrev[j2]; float dist = 0.0f;
@@ -2644,7 +2671,7 @@ static int interp_build_view(float t, int first) {
             if (sInterpPair[i] >= 0 || sInterpSig[i] == 0 || (sInterpKind[i] >> 6) != 2) {
                 continue;
             }
-            if (i < 30 && getenv("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_JUMPS"))) {
+            if (i < 30 && env_once("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_JUMPS"))) {
                 float be = 1e30f; int bj = -1, cand = 0;
                 for (j2 = 0; j2 < sInterpPrevCount; j2++) {
                     const float *q = sInterpPrevRep[j2]; float e;
@@ -2798,7 +2825,7 @@ static int interp_build_view(float t, int first) {
                    moment. A short teleport is now blended, as one picture half way.) */
                 bad = fabsf(sp[0] / sp[3] - pr[0] / pr[3]) > 350.0f + 1.5f * cam || fabsf(sp[1] / sp[3] - pr[1] / pr[3]) > 300.0f + 1.5f * cam;
             }
-            if (bad && first && getenv("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_JUMPS"))) {
+            if (bad && first && env_once("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_JUMPS"))) {
                 fprintf(stderr, "jump block %u layer %.0f now %.0f,%.0f w %.1f; was %.0f,%.0f w %.1f; by the camera alone %.0f,%.0f w %.1f; pivot %.1f %.1f %.1f point %.1f %.1f %.1f\n", i, c->misc[3],
                         sc[0] / sc[3], sc[1] / sc[3], sc[3], sp[0] / sp[3], sp[1] / sp[3], sp[3], pr[0] / pr[3], pr[1] / pr[3], pr[3], c->pivotA[0], c->pivotA[1], c->pivotA[2],
                         sInterpRep[i][0], sInterpRep[i][1], sInterpRep[i][2]);
@@ -2811,7 +2838,7 @@ static int interp_build_view(float t, int first) {
         /* A cut: the scenery in view says so; where there is none to ask (a transformation's or an ultimate's own
            scenes before a backdrop), the fighters do. (With scenery in view the fighters are not asked: one that
            dashes past the camera goes far and to another distance in one tick, and that is no cut.) */
-        if (getenv("BT3_INTERP_CUTLOG") != NULL) {
+        if (env_once("BT3_INTERP_CUTLOG") != NULL) {
             fprintf(stderr, "cut? frame %u: agreed %d, still in view %u, far %u, camera move %.0f; fighter parts %u, big %u; blocks %u, paired %u\n", gGsFrame, agreed, still, far, cam, movN, movBig, gsVuUniCount,
                     (unsigned)0);
         }
@@ -2866,7 +2893,7 @@ static int interp_build_view(float t, int first) {
        (seen in a low fly-by: the pictures a quarter and nine tenths of the way were right, those between were not).
        So: if the way from the previous place to this one crosses a triangle of the scenery, the tick gets no
        in-between pictures. */
-    if (agreed && sInterpHaveCam && getenv("BT3_INTERP_THROUGH") == NULL) {
+    if (agreed && sInterpHaveCam && env_once("BT3_INTERP_THROUGH") == NULL) {
         float a0[3], d0[3], lo3[3], hi3[3], len;
         uint32_t n2;
         int k3, hit = 0;
@@ -2936,7 +2963,7 @@ static int interp_build_view(float t, int first) {
     /* 4. The blend. */
 blend:
     sInterpHaveDt = 0;
-    if (agreed && sInterpRoots && getenv("BT3_INTERP_LINEAR") == NULL) {
+    if (agreed && sInterpRoots && env_once("BT3_INTERP_LINEAR") == NULL) {
         /* the camera's change over the rest of the tick, 1 - t of it, from its halves, quarters and eighths */
         float left = (1.0f - t) * 8.0f;
         int m = (int)(left + 0.5f), bit;
@@ -2974,7 +3001,7 @@ blend:
             scenery = k2 < nscreens;
         }
 
-        if (first && i >= 10 && i <= 42 && getenv("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_JUMPS"))) {
+        if (first && i >= 10 && i <= 42 && env_once("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_JUMPS"))) {
             const Vu0Uniform *q = sInterpPair[i] >= 0 ? &sInterpPrev[sInterpPair[i]] : NULL;
             float sc[4], sp[4] = {0, 0, 0, 0};
             uint32_t n2, tris = 0; int pipe = -1, target = -1;
@@ -2995,16 +3022,16 @@ blend:
             fprintf(stderr, "block %u kind %u sig %08x pair %d scenery %d tris %u pipe %d target %d | now %.0f,%.0f w %.2f | was %.0f,%.0f w %.2f | colour %.0f %.0f %.0f %.0f\n", i, sInterpKind[i], sInterpSig[i], sInterpPair[i], scenery, tris, pipe, target,
                     sc[0] / sc[3], sc[1] / sc[3], sc[3], q ? sp[0] / sp[3] : 0.0f, q ? sp[1] / sp[3] : 0.0f, sp[3], c->color0[0], c->color0[1], c->color0[2], c->color0[3]);
         }
-        if (getenv("BT3_INTERP_ONE") != NULL) { /* testing: leave the blocks from..to as picture n has them */
+        if (env_once("BT3_INTERP_ONE") != NULL) { /* testing: leave the blocks from..to as picture n has them */
             int lo2 = 0, hi2 = -1;
-            sscanf(getenv("BT3_INTERP_ONE"), "%d-%d", &lo2, &hi2);
-            if ((int)i >= lo2 && (int)i <= hi2 && getenv("BT3_INTERP_PART") == NULL) {
+            sscanf(env_once("BT3_INTERP_ONE"), "%d-%d", &lo2, &hi2);
+            if ((int)i >= lo2 && (int)i <= hi2 && env_once("BT3_INTERP_PART") == NULL) {
                 continue;
             }
-            part = (int)i >= lo2 && (int)i <= hi2 ? atoi(getenv("BT3_INTERP_PART")) : 0;
+            part = (int)i >= lo2 && (int)i <= hi2 ? atoi(env_once("BT3_INTERP_PART")) : 0;
         }
-        if (getenv("BT3_INTERP_SKIP") != NULL) { /* testing: leave a kind of block as picture n has it */
-            int what = atoi(getenv("BT3_INTERP_SKIP"));
+        if (env_once("BT3_INTERP_SKIP") != NULL) { /* testing: leave a kind of block as picture n has it */
+            int what = atoi(env_once("BT3_INTERP_SKIP"));
             if ((what == 1 && sInterpSig[i] == 0x53484457u) || (what == 2 && c->misc[3] == 2.0f) || (what == 3 && c->misc[3] <= 1.0f && sInterpSig[i] != 0x53484457u) ||
                 (what == 4 && c->misc[3] >= 3.0f)) {
                 continue;
@@ -3082,7 +3109,7 @@ blend:
             if (!scenery) {
                 continue;
             }
-            if (first && getenv("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_JUMPS"))) {
+            if (first && env_once("BT3_INTERP_JUMPS") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_JUMPS"))) {
                 uint32_t n2, tris = 0, draws = 0;
                 int vu = 0, pipe = 0;
                 for (n2 = 0; n2 < gsDrawCount; n2++) {
@@ -3091,7 +3118,7 @@ blend:
                 fprintf(stderr, "camera-placed block %u: program kind %d, layer %.0f, %u draws, %u triangles, pipeline %d, colour %.0f %.0f %.0f %.0f, bone moves %d\n", i, vu, c->misc[3], draws, tris, pipe,
                         c->color0[0], c->color0[1], c->color0[2], c->color0[3], c->boneA[12] != 0.0f || c->boneA[13] != 0.0f);
             }
-            if (getenv("BT3_INTERP_ONE") != NULL && (int)i == atoi(getenv("BT3_INTERP_ONE"))) {
+            if (env_once("BT3_INTERP_ONE") != NULL && (int)i == atoi(env_once("BT3_INTERP_ONE"))) {
                 continue;
             }
             if (sInterpHaveDt) {
@@ -3115,10 +3142,10 @@ blend:
             memcpy(o->screen, c->screen, 64);
         }
     }
-    if (first && getenv("BT3_INTERP_FRAMES") != NULL) { /* testing: one line per picture */
+    if (first && env_once("BT3_INTERP_FRAMES") != NULL) { /* testing: one line per picture */
         static FILE *fp;
         extern unsigned gPortVBlanks;
-        if (fp == NULL) { fp = fopen(getenv("BT3_INTERP_FRAMES"), "w"); }
+        if (fp == NULL) { fp = fopen(env_once("BT3_INTERP_FRAMES"), "w"); }
         if (fp != NULL) {
             fprintf(fp, "%u %u blocks %u paired %u jumped %u previous %u camera %d\n", gPortVBlanks, gGsFrame, gsVuUniCount, paired, jumped, sInterpPrevCount, agreed * 100 + (int)nscreens);
             { uint32_t f2 = 0, i2; for (i2 = 0; i2 < gsVuUniCount; i2++) { f2 += sInterpFollow[i2]; } fprintf(fp, "  follow %u\n", f2); }
@@ -3295,7 +3322,7 @@ static int interp_reproject_with(const float *D, const Vtx *v, float *x, float *
        jumped sideways in every in-between picture (found by the user). */
     zadd = depth_frac() ? 0.0f : 0.5f;
     zs = v->z * sInterpZMax - zadd;
-    if (getenv("BT3_INTERP_ZRAW") != NULL) { /* (testing: the stored depth as it is, the fault this corrects) */
+    if (env_once("BT3_INTERP_ZRAW") != NULL) { /* (testing: the stored depth as it is, the fault this corrects) */
         zs += zadd;
         zadd = 0.0f;
     } else if (!depth_frac() && zs < sInterpZMax - (float)GS_Z_LEAD) {
@@ -3749,12 +3776,12 @@ static void interp_wall_restore(void) {
 static void interp_wall_into(float t, Vtx *buf, int test);
 
 static void interp_wall(float t) {
-    interp_wall_into(t, sInterpBlendVerts, getenv("BT3_INTERP_WALLTEST") != NULL);
+    interp_wall_into(t, sInterpBlendVerts, env_once("BT3_INTERP_WALLTEST") != NULL);
 }
 
 /* The tick's real picture, while in-between pictures are shown: its wall drawn the same way, at the tick itself. */
 static void interp_wall_real(void) {
-    if (getenv("BT3_INTERP_WALLGAME") == NULL) { /* (the switch: the game's own triangles in the real picture, to compare) */
+    if (env_once("BT3_INTERP_WALLGAME") == NULL) { /* (the switch: the game's own triangles in the real picture, to compare) */
         interp_wall_into(1.0f, gsVerts, 1);
     }
 }
@@ -3773,14 +3800,14 @@ static void interp_wall_into(float t, Vtx *buf, int test) {
     }
 
     sWallPatches = 0;
-    if (getenv("BT3_INTERP_WALLLOG") != NULL && sWallSeq != 0) {
+    if (env_once("BT3_INTERP_WALLLOG") != NULL && sWallSeq != 0) {
         uint32_t wd = 0, wv = 0;
         for (n = 0; n < gsDrawCount; n++) {
             if (gsDraws[n].wall) { wd++; wv += gsDraws[n].count; }
         }
         fprintf(stderr, "wall: frame %u: %d patches handed over so far, %u draws with %u vertices are the wall's (tex0 %llx)\n", gGsFrame, (int)sWallSeq, wd, wv, (unsigned long long)sWallTex0);
     }
-    if (sWallSeq == 0 || getenv("BT3_INTERP_NOWALL") != NULL) {
+    if (sWallSeq == 0 || env_once("BT3_INTERP_NOWALL") != NULL) {
         return;
     }
     for (n = 0; n < gsDrawCount; n++) { /* the views the wall is drawn in, the left one first */
@@ -3916,7 +3943,7 @@ static void interp_wall_into(float t, Vtx *buf, int test) {
                 }
             }
         }
-        if (getenv("BT3_INTERP_WALLLOG") != NULL) {
+        if (env_once("BT3_INTERP_WALLLOG") != NULL) {
             fprintf(stderr, "wall: frame %u view %d of %d: %d patches are this view's, %u vertices made, nearest w %.2f\n", gGsFrame, k, nids, used, made, wNear);
         }
         if (used == 0) {
@@ -4010,7 +4037,7 @@ static void interp_build_verts(float t) {
             /* (half of them is enough: the tiles of the wall that are shown change from picture to picture, and
                the new ones have nothing to land on) */
             staticKind = okS >= 1 && okS * 2 >= tested;
-            if (getenv("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_DUMP"))) {
+            if (env_once("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_DUMP"))) {
                 const InterpPrim *c = &sInterpPrims[i];
                 const Vtx *cv = &gsVerts[c->first];
                 float bx = 0.0f, by = 0.0f, bz = 0.0f, bd = 1e9f;
@@ -4027,7 +4054,7 @@ static void interp_build_verts(float t) {
         {
             int e = interp_kind_find(sInterpPrims[i].kind, 0);
             int byCorners = e >= 0 && sInterpKinds[e].isStatic;
-            if (getenv("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_DUMP")) && e >= 0) {
+            if (env_once("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_DUMP")) && e >= 0) {
                 fprintf(stderr, "  kind %08x by corners: %u pieces, %u corners tested, %u landed -> %d (by pieces %d)\n", sInterpPrims[i].kind, sInterpKinds[e].count, sInterpKinds[e].tested, sInterpKinds[e].landed, byCorners, staticKind);
             }
             if (byCorners && !staticKind) {
@@ -4086,7 +4113,7 @@ static void interp_build_verts(float t) {
                 }
                 if (x0 < -8.0f || y0 < -8.0f || x1 > 520.0f || y1 > 456.0f || (x1 - x0) * (y1 - y0) > 6000.0f) {
                     int okc = interp_piece_camera(c, t);
-                    if (getenv("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_DUMP"))) {
+                    if (env_once("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_DUMP"))) {
                         fprintf(stderr, "big piece kind %08x tris %d at %.0f,%.0f..%.0f,%.0f q %.5f..%.5f: by the camera %d\n", c->kind, c->tris, x0, y0, x1, y1, cv[0].q, cv[nv - 1].q, okc);
                     }
                     if (okc) {
@@ -4180,7 +4207,7 @@ static void interp_build_verts(float t) {
                 const Vtx *pv = &sInterpPrevVerts[sInterpPrevPrims[lo + best].first];
                 Vtx *ov = &sInterpBlendVerts[c->first];
                 sInterpPrimUsed[lo + best] = 1;
-                if (bestD != 0.0f && getenv("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(getenv("BT3_INTERP_DUMP"))) {
+                if (bestD != 0.0f && env_once("BT3_INTERP_DUMP") != NULL && (int)gGsFrame == atoi(env_once("BT3_INTERP_DUMP"))) {
                     float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f, px0 = 1e9f, px1 = -1e9f, py0 = 1e9f, py1 = -1e9f;
                     for (k = 0; k < nv; k++) {
                         if (cv[k].x < x0) { x0 = cv[k].x; } if (cv[k].x > x1) { x1 = cv[k].x; }
@@ -4246,7 +4273,7 @@ static void interp_present_log(char kind) {
 
     if (!tried) {
         tried = 1;
-        fp = getenv("BT3_PRESENT_LOG") != NULL ? fopen(getenv("BT3_PRESENT_LOG"), "w") : NULL;
+        fp = env_once("BT3_PRESENT_LOG") != NULL ? fopen(env_once("BT3_PRESENT_LOG"), "w") : NULL;
     }
     if (fp != NULL) {
         fprintf(fp, "%llu %c %u\n", (unsigned long long)(gpu_now() / 1000ull), kind, gPortVBlanks);
@@ -4300,7 +4327,7 @@ static void interp_cost(uint64_t ns) {
         ns = 100000000ull;
     }
     sInterpCostNs = sInterpCostNs == 0 ? ns : (sInterpCostNs * 7 + ns) / 8;
-    if (getenv("BT3_INTERP_NOCAP") != NULL) {
+    if (env_once("BT3_INTERP_NOCAP") != NULL) {
         return;
     }
     /* down when the pictures take more than 70% of the tick (the rest is the game's own work), up again when one
@@ -4324,21 +4351,21 @@ static void interp_show(int step) {
     if (step < sInterpSteps) {
         Vu0Uniform *real = gsVuUni;
         Vtx *realVerts = gsVerts;
-        float t = getenv("BT3_INTERP_T") != NULL ? (float)atof(getenv("BT3_INTERP_T")) : (float)step / (float)sInterpSteps;
+        float t = env_once("BT3_INTERP_T") != NULL ? (float)atof(env_once("BT3_INTERP_T")) : (float)step / (float)sInterpSteps;
 
         if (step > 1) {
             interp_build(t, 0); /* (the first was built to decide whether the tick can be blended at all) */
         }
-        if (getenv("BT3_INTERP_STEPLOG") != NULL) {
+        if (env_once("BT3_INTERP_STEPLOG") != NULL) {
             fprintf(stderr, "step %d of %d, t %.3f, frame %u\n", step, sInterpSteps, t, gGsFrame);
         }
-        if (getenv("BT3_INTERP_3D") == NULL) { /* (BT3_INTERP_3D=1: the vertex programs' draws only, as the first prototype) */
+        if (env_once("BT3_INTERP_3D") == NULL) { /* (BT3_INTERP_3D=1: the vertex programs' draws only, as the first prototype) */
             interp_build_verts(t);
             interp_wall(t);
             gsVerts = sInterpBlendVerts;
         }
         gsVuUni = sInterpBlend;
-        if (getenv("BT3_INTERP_REALONLY") == NULL) { /* (testing: only the ticks' real pictures are shown, numbered as without in-between pictures) */
+        if (env_once("BT3_INTERP_REALONLY") == NULL) { /* (testing: only the ticks' real pictures are shown, numbered as without in-between pictures) */
             uint64_t t0 = gpu_now();
             sBackend->frameEnd();
             interp_cost(gpu_now() - t0);
@@ -4407,7 +4434,7 @@ void GsGpu_InterpPump(int ahead_ms, int all) {
                 SDL_DelayPrecise(due - now);
             }
         }
-        if (sInterpNext == sInterpSteps && getenv("BT3_INTERP_ONLY") != NULL) {
+        if (sInterpNext == sInterpSteps && env_once("BT3_INTERP_ONLY") != NULL) {
             sInterpNext = 0; /* testing: only in-between pictures are shown (so a screenshot holds one) */
             interp_counts_restore();
             interp_remember();
@@ -4459,7 +4486,7 @@ static void skip_decide(void) {
     int skip = GsDraw_FrameSkip() && getenv("BT3_UNCAPPED") == NULL && getenv("BT3_SHOT") == NULL && !gPortOverlayOpen &&
                behind > (int)(Port_BlankNs() / 1000ull) && sSkipRun < 4;
 
-    if (getenv("BT3_SKIP_FORCE") != NULL) { /* testing: every other tick is left out, whatever the clock says */
+    if (env_once("BT3_SKIP_FORCE") != NULL) { /* testing: every other tick is left out, whatever the clock says */
         skip = sSkipRun == 0;
     }
 
@@ -4531,7 +4558,7 @@ void GsGpu_FrameEnd(void) {
             interp_signatures(sInterpSig);
             sInterpPrimCount = interp_prims(sInterpPrims);
         }
-        if (gsInterp > 0 && sInterpSteps > 1 && interp_build(getenv("BT3_INTERP_T") != NULL ? (float)atof(getenv("BT3_INTERP_T")) : 1.0f / (float)sInterpSteps, 1)) {
+        if (gsInterp > 0 && sInterpSteps > 1 && interp_build(env_once("BT3_INTERP_T") != NULL ? (float)atof(env_once("BT3_INTERP_T")) : 1.0f / (float)sInterpSteps, 1)) {
             uint64_t before;
 
             sInterpSaved.verts = gsVertCount;
@@ -4553,7 +4580,7 @@ void GsGpu_FrameEnd(void) {
                 sInterpBlendTook = 4000000ull;
             }
             sInterpNext = 2;
-            if (getenv("BT3_INTERP_LOG") != NULL && (gInterpTicks++ % 300) == 299) {
+            if (env_once("BT3_INTERP_LOG") != NULL && (gInterpTicks++ % 300) == 299) {
                 fprintf(stderr, "interp: %u in-between pictures shown, %u ticks without; blocks: %u blended, %u not\n", gInterpShown, gInterpSkipped, gInterpPaired, gInterpUnpaired);
                 fprintf(stderr, "interp:   of those without a partner, %u moved with the camera\n", gInterpCamera);
                 fprintf(stderr, "interp:   effects and 2D: %u triangles, %u moved, %u still; not paired: %u new kind, %u too far, %u other texture piece, %u none free\n",
