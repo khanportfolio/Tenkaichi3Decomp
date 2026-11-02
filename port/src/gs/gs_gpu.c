@@ -1377,7 +1377,8 @@ static void vk_frame_end(void) {
                 SDL_GPUTextureSamplerBinding tsb;
                 SDL_GPUViewport vp;
                 SDL_GPURenderPass *pp;
-                float params[8] = {(float)(strength > 100 ? 100 : strength) / 100.0f, 0.35f, 0.35f, 0.6f, 0.25f, 0.25f, 0.72f, 0.0f};
+                float params[12] = {(float)(strength > 100 ? 100 : strength) / 100.0f, 0.35f, 0.35f, 0.6f, 0.25f, 0.25f, 0.72f, 0.0f,
+                                    512.0f / (float)GS_W, 448.0f / (float)GS_H, 0.0f, 0.0f}; /* (the page in the larger buffer, as the copy's source) */
                 SDL_zero(ct);
                 ct.texture = swap;
                 ct.load_op = SDL_GPU_LOADOP_CLEAR;
