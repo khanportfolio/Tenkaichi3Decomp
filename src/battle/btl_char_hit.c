@@ -129,7 +129,7 @@ extern s32 BtlSkill_GetFrames(HitChr *chr, s32 dir);
 /* Model objects and maths. */
 #ifdef PORT
 extern s32 BtlCharApi_GetChara(s32 objId);
-extern int Port_OmniDamage(int attacker, int defender, int damage); /* plat_charas.c */
+extern int Port_OmniDamage(int attacker, int defender, int damage, int healthMax, int *exact); /* plat_charas.c */
 #endif
 extern f32 BtlCharApi_GetHeight(s32 objId);                             /* body size, obj + 0xFF4 */
 extern f32 BtlCharApi_GetRadius(s32 objId);                             /* body radius */
@@ -1354,7 +1354,12 @@ void BtlHit_ApplyHit(HitChr *atk) {
     case 0x16:
     case 0x25:
 #ifdef PORT
-        def->react.damage = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), BtlAtk_GetDamage(atk));
+        {
+            s32 exact;
+
+            def->react.damage = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), BtlAtk_GetDamage(atk),
+                                                BtlMember_GetActiveGauge(def)->healthMax, &exact);
+        }
 #else
         def->react.damage = BtlAtk_GetDamage(atk);
 #endif
@@ -1390,7 +1395,15 @@ void BtlHit_ApplyHit(HitChr *atk) {
             break;
         }
 #ifdef PORT
-        dmg = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), dmg);
+        {
+            s32 exact;
+
+            dmg = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), dmg,
+                                  BtlMember_GetActiveGauge(def)->healthMax, &exact);
+            if (exact) {
+                type |= 0x181; /* BTL_DMG_NO_DEFENSE | BTL_DMG_NO_HALVE | BTL_DMG_NO_SCALING */
+            }
+        }
 #endif
         BtlMember_Damage(def, dmg, type);
         break;

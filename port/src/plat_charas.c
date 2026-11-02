@@ -35,6 +35,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include <time.h>
 #include "plat_charas.h"
 
 extern int PortExtras_Dir(const char *kind, const char *env, char *out, unsigned size); /* plat_extras.c */
@@ -1503,7 +1504,7 @@ int Port_CharaStat(int chara, int which, int value) {
     return c != NULL && which >= 0 && which < PORT_STAT_COUNT && c->stat[which] >= 0 ? c->stat[which] : value;
 }
 
-/* omni=1 in a manifest, offline: the fighter's hits end any other fighter at once, two of them barely hurt each
+/* omni=1 in a manifest, offline: two of the fighter's hits end any other fighter, two of them barely hurt each
    other, and everyone but Goku cowers at the start of the fight. */
 int Port_CharaOmni(int chara) {
     const Chara *c;
@@ -1515,14 +1516,26 @@ int Port_CharaOmni(int chara) {
     return c != NULL && c->omni;
 }
 
-int Port_OmniDamage(int attacker, int defender, int damage) {
+/* Each heavy hit takes 55% of the maximum health, so a second one ends the fight. The hits of one rush or one
+   many-hit blast count once: inside OMNI_GAP_MS of a heavy hit the same fighter only takes a tenth. *exact: leave
+   the amount as it is (no defense, no combo scaling). */
+#define OMNI_GAP_MS 700
+
+int Port_OmniDamage(int attacker, int defender, int damage, int healthMax, int *exact) {
+    static clock_t sLast[512];
+    clock_t now = clock();
+    clock_t *last = &sLast[(unsigned)defender & 511];
+
+    *exact = 0;
     if (!Port_CharaOmni(attacker)) {
         return damage;
     }
-    if (Port_CharaOmni(defender)) {
+    if (Port_CharaOmni(defender) || (*last != 0 && (now - *last) * 1000 / CLOCKS_PER_SEC < OMNI_GAP_MS)) {
         return damage > 10 ? damage / 10 : damage;
     }
-    return 1000000;
+    *last = now;
+    *exact = 1;
+    return healthMax / 100 * 55 + 10;
 }
 
 int Port_OmniFears(int chara, int other) {

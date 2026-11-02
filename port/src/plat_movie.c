@@ -303,7 +303,7 @@ void Port_StoryTalkSay(int speaker, int other) {
     b = story_group_of(other);
     if ((a < 0 || b < 0) && Port_CharaOmni(speaker) != Port_CharaOmni(other)) { /* no pair written: every fighter still knows him */
         pthread_mutex_lock(&sStoryLock);
-        snprintf(sStoryNow, sizeof(sStoryNow), "%s", Port_CharaOmni(speaker) ? "Zeno: I am the Omni King. Bye bye." : "The Omni King?! Please... not me!");
+        snprintf(sStoryNow, sizeof(sStoryNow), "%s", Port_CharaOmni(speaker) ? "" : "The Omni King?! Please... not me!");
         pthread_mutex_unlock(&sStoryLock);
         return;
     }
@@ -317,7 +317,7 @@ void Port_StoryTalkSay(int speaker, int other) {
             text = sStoryPairs[i].lineB;
         }
     }
-    if (text != NULL) {
+    if (text != NULL && text[0] != '\0') { /* (an empty line: nothing shown, for a voice with no matching words) */
         pthread_mutex_lock(&sStoryLock);
         snprintf(sStoryNow, sizeof(sStoryNow), "%s: %s", sStoryGroups[a].name, text);
         pthread_mutex_unlock(&sStoryLock);
