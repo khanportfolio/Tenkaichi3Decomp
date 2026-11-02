@@ -38,6 +38,9 @@ static SDL_GPUTransferBuffer *sVxfer;
 static SDL_GPUSampler *sSamplers[16]; /* bit 0 filtered, bit 1 / 2 clamped in u / v, bit 3 with the smaller copies (mip levels) */
 static SDL_GPUTexture *sWhite;
 static SDL_GPUGraphicsPipeline *sOutlinePipe, *sKeyPipe;
+static SDL_GPUGraphicsPipeline *sPostPipe; /* the finishing pass to the window (post.frag), made at the first frame */
+static SDL_GPUTextureFormat sPostFormat;
+static int sPostTried;
 static SDL_GPUTexture *sFbTex[2]; /* pictures uploaded into the two display buffers (movies) */
 static SDL_GPUShader *sFxVs, *sDclutFs;
 static SDL_GPUTexture *sDateCopy; /* the alpha bytes as they were before a run of draws that test them (TEST.DATE) */
@@ -1338,7 +1341,67 @@ static void vk_frame_end(void) {
         }
         bl.load_op = SDL_GPU_LOADOP_CLEAR;
         bl.filter = SDL_GPU_FILTER_LINEAR;
-        SDL_BlitGPUTexture(cmd, &bl);
+        {
+            /* The finishing pass (`post` 1 = on, the default; `post_strength` 0..100), else the plain copy. */
+            int strength = Port_Setting("post", 1) ? Port_Setting("post_strength", 100) : 0;
+            SDL_GPUTextureFormat fmt = SDL_GetGPUSwapchainTextureFormat(sDev, sWindow);
+            if (strength > 0 && (!sPostTried || fmt != sPostFormat)) {
+                SDL_GPUShader *fs = shader(SHADER_CODE(kPostFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+                SDL_GPUColorTargetDescription cd;
+                SDL_GPUGraphicsPipelineCreateInfo ci;
+                sPostTried = 1;
+                sPostFormat = fmt;
+                SDL_zero(cd);
+                SDL_zero(ci);
+                cd.format = fmt;
+                ci.vertex_shader = sFxVs;
+                ci.fragment_shader = fs;
+                ci.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+                ci.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+                ci.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+                ci.target_info.color_target_descriptions = &cd;
+                ci.target_info.num_color_targets = 1;
+                if (sPostPipe != NULL) {
+                    SDL_ReleaseGPUGraphicsPipeline(sDev, sPostPipe);
+                }
+                sPostPipe = fs != NULL && sFxVs != NULL ? SDL_CreateGPUGraphicsPipeline(sDev, &ci) : NULL;
+                if (fs != NULL) {
+                    SDL_ReleaseGPUShader(sDev, fs);
+                }
+                if (sPostPipe == NULL) {
+                    fprintf(stderr, "bt3: finishing pass not available: %s\n", SDL_GetError());
+                }
+            }
+            if (strength > 0 && sPostPipe != NULL) {
+                SDL_GPUColorTargetInfo ct;
+                SDL_GPUTextureSamplerBinding tsb;
+                SDL_GPUViewport vp;
+                SDL_GPURenderPass *pp;
+                float params[8] = {(float)(strength > 100 ? 100 : strength) / 100.0f, 0.35f, 0.35f, 0.6f, 0.25f, 0.25f, 0.72f, 0.0f};
+                SDL_zero(ct);
+                ct.texture = swap;
+                ct.load_op = SDL_GPU_LOADOP_CLEAR;
+                ct.store_op = SDL_GPU_STOREOP_STORE;
+                ct.clear_color.a = 1.0f;
+                SDL_PushGPUFragmentUniformData(cmd, 0, params, sizeof(params));
+                pp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+                SDL_zero(vp);
+                vp.x = (float)bl.destination.x;
+                vp.y = (float)bl.destination.y;
+                vp.w = (float)bl.destination.w;
+                vp.h = (float)bl.destination.h;
+                vp.max_depth = 1.0f;
+                SDL_SetGPUViewport(pp, &vp);
+                SDL_BindGPUGraphicsPipeline(pp, sPostPipe);
+                tsb.texture = sTgCol[best];
+                tsb.sampler = sSamplers[7]; /* filtered, clamped */
+                SDL_BindGPUFragmentSamplers(pp, 0, &tsb, 1);
+                SDL_DrawGPUPrimitives(pp, 3, 1, 0, 0);
+                SDL_EndGPURenderPass(pp);
+            } else {
+                SDL_BlitGPUTexture(cmd, &bl);
+            }
+        }
         gUiPresentX = (int)bl.destination.x; /* the stage-name overlay maps game pixels through this rectangle */
         gUiPresentY = (int)bl.destination.y;
         gUiPresentW = (int)bl.destination.w;
