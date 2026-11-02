@@ -4353,7 +4353,7 @@ static void interp_cost(uint64_t ns) {
    pictures (SDL_DelayPrecise: waiting on purpose, not work). */
 enum { IP_DECIDE, IP_BUILD, IP_SHOW_B, IP_SHOW_R, IP_REMEMBER, IP_PACE, IP_COUNT };
 static uint64_t sInterpProf[IP_COUNT];
-static unsigned sInterpProfShown;
+static unsigned sInterpProfShown, sInterpProfBehind; /* (in-between pictures shown; ticks without one, being behind) */
 
 static void interp_prof_report(void) {
     static unsigned ticks;
@@ -4363,13 +4363,13 @@ static void interp_prof_report(void) {
     ticks = 0;
     if (getenv("BT3_GS_VERBOSE") != NULL) {
         fprintf(stderr, "time:   smooth motion per tick: deciding %.2f ms, building %.2f, showing in-between %.2f, showing real %.2f, keeping %.2f, "
-                        "pacing waits %.2f; %.2f in-between pictures a tick\n",
+                        "pacing waits %.2f; %.2f in-between pictures a tick, %u ticks without one for being behind\n",
                 (double)sInterpProf[IP_DECIDE] / 60e6, (double)sInterpProf[IP_BUILD] / 60e6, (double)sInterpProf[IP_SHOW_B] / 60e6,
                 (double)sInterpProf[IP_SHOW_R] / 60e6, (double)sInterpProf[IP_REMEMBER] / 60e6, (double)sInterpProf[IP_PACE] / 60e6,
-                (double)sInterpProfShown / 60.0);
+                (double)sInterpProfShown / 60.0, sInterpProfBehind);
     }
     memset(sInterpProf, 0, sizeof(sInterpProf));
-    sInterpProfShown = 0;
+    sInterpProfShown = sInterpProfBehind = 0;
 }
 
 static void interp_show(int step) {
@@ -4587,6 +4587,21 @@ void GsGpu_FrameEnd(void) {
             blanks = blanks < 1 ? 1 : blanks > 2 ? 2 : blanks;
             sInterpSteps = (interp_steps() < sInterpCap ? interp_steps() : sInterpCap) * (int)blanks / 2;
             sInterpTickNs = (uint64_t)blanks * Port_BlankNs();
+        }
+        {   /* Behind the clock already (a slow tick: an effect starting, a load): this tick has no in-between
+               picture. One costs as much as the real one (about 6 ms here, and 1.6 ms of deciding), and drawn anyway
+               it made the game later still, until whole ticks were left out (skip_decide): a jump of 66 ms instead
+               of one tick at 30 a second (measured on a GTX 1650 / i5-9300H laptop: about 400 ticks left out in a
+               demo fight, 77 with smooth motion off). BT3_INTERP_BEHIND_US=<us> sets the limit, 0 switches it off. */
+            extern int Port_PaceBehindUs(void); /* plat_stub.c */
+            static int limit = -1;
+            if (limit < 0) {
+                limit = env_once("BT3_INTERP_BEHIND_US") != NULL ? atoi(env_once("BT3_INTERP_BEHIND_US")) : 3000;
+            }
+            if (sInterpSteps > 1 && limit > 0 && Port_PaceBehindUs() > limit) {
+                sInterpSteps = 1;
+                sInterpProfBehind++;
+            }
         }
         uint64_t td = gpu_now();
         int blend;
