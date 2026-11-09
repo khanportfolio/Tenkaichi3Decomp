@@ -74,6 +74,7 @@ typedef struct {
     int labelSet;              /* a label was given (an empty one: no label); without, the base's label */
     int stat[PORT_STAT_COUNT]; /* health, ki, blast stocks: -1 not said */
     int omni;                  /* omni=1: see Port_OmniDamage */
+    int damage;                /* damage=<percent> the fighter's hits do (Port_OmniDamage); 0 = not said (100) */
     int pkg;                   /* its entry in sPkg, or -1 */
     short par[PAR_COUNT];      /* bytes of the parameter block from 0x98 (PAR_*): -1 not said */
     unsigned char freshSet;    /* bits 0..3: `<slot>_fresh` said (bit 4 + k of +0xAD) */
@@ -343,6 +344,8 @@ static void apply(Chara *c, const char *key, const char *value) {
         }
     } else if (strcmp(key, "omni") == 0) {
         c->omni = strcmp(value, "1") == 0;
+    } else if (strcmp(key, "damage") == 0) {
+        c->damage = number(value, 10, 1000, &x) ? x : 0;
     } else if (strcmp(key, "form") == 0) {
         put(c->label, sizeof(c->label), value);
         c->labelSet = 1;
@@ -1516,6 +1519,21 @@ int Port_CharaOmni(int chara) {
     return c != NULL && c->omni;
 }
 
+/* damage=<percent> in a manifest, offline: the fighter's hits do that share of what they would do (10..1000;
+   not said: 100). Online every fighter hits as on the disc. */
+int Port_CharaDamage(int chara, int damage) {
+    const Chara *c;
+    PortCharas_Init();
+    if (Port_NetSession()) {
+        return damage;
+    }
+    c = chara_of(chara);
+    if (c == NULL || c->damage == 0 || c->damage == 100) {
+        return damage;
+    }
+    return (int)((long long)damage * c->damage / 100);
+}
+
 /* Each heavy hit takes 55% of the maximum health, so a second one ends the fight. The hits of one rush or one
    many-hit blast count once: inside OMNI_GAP_MS of a heavy hit the same fighter only takes a tenth. *exact: leave
    the amount as it is (no defense, no combo scaling). */
@@ -1528,7 +1546,7 @@ int Port_OmniDamage(int attacker, int defender, int damage, int healthMax, int *
 
     *exact = 0;
     if (!Port_CharaOmni(attacker)) {
-        return damage;
+        return Port_CharaDamage(attacker, damage);
     }
     if (Port_CharaOmni(defender) || (*last != 0 && (now - *last) * 1000 / CLOCKS_PER_SEC < OMNI_GAP_MS)) {
         return damage > 10 ? damage / 10 : damage;

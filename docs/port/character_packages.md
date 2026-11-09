@@ -127,6 +127,7 @@ Rules of the reader, so that every tool and every hand writes files it accepts:
 | `health` | `10000`..`150000` | Health, 10000 for each bar (section 7). |
 | `ki` | `0`..`100000` | Ki at the start of a fight; 100000 is a full gauge. |
 | `blast` | `0`..`7` | Number of blast stocks. |
+| `damage` | `10`..`1000` | How hard the character's hits are, in percent of what they would do (section 7). |
 
 Ids may be written in decimal or as `0x..`. A value that is not a number in its range is not used and draws a
 remark. `port/tools/import_chara.py <game data> --names` prints the 161 ids with the names of your own disc.
@@ -278,6 +279,10 @@ takes from its table of characters:
 | `health` | 10000 = one bar | 30000 .. 50000 | 10000 .. 150000 |
 | `ki` | 100000 = a full gauge, at the start of a fight | 0 .. 100000 | 0 .. 100000 |
 | `blast` | stocks | 4 .. 7 | 0 .. 7 |
+| `damage` | percent of the damage the character's hits do | 100 | 10 .. 1000 |
+
+`damage` scales every hit the character lands (rushes, blasts, ultimates); 100 leaves it as it is. Offline only,
+as every number of a package. A character with `omni=1` keeps its own rule instead.
 
 Items that add or take health work on top of the number, as they do in the original. The fight's display was
 made for the disc's range; how it draws more than eight bars has not been looked at on a screen.
