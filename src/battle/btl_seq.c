@@ -810,6 +810,13 @@ s32 BtlSeq_GetTimeLeft(void) {
 extern void Port_StoryTalkSay(int speaker, int other); /* plat_movie.c */
 extern void Port_StoryTalkClear(void);
 extern int Port_OmniFears(int chara, int other); /* plat_charas.c */
+/* The speaker (0 first, 1 second) cowers before the Omni King in the lose pose instead of the entrance. Not every
+   fighter's lose animation reports its end (flag 0x31; added fighters with other animations), so the intro does
+   not wait for that pose to settle: the line's end or the 10 s timer moves on, as for any speaker. */
+static int sOmniCowers[2];
+#define PORT_OMNI_COWERS(i) || sOmniCowers[i]
+#else
+#define PORT_OMNI_COWERS(i)
 #endif
 
 /* Stops both fighters' talk animation and both voice players. */
@@ -865,6 +872,9 @@ s32 BtlSeqIntroTalk_Setup(BtlSeqTalkCtx *ctx) {
     }
     ctx->step = 0;
     Ramp_Start(&ctx->timer, 10.0f, 0.0f, 1.0f);
+#ifdef PORT
+    sOmniCowers[0] = sOmniCowers[1] = 0;
+#endif
     return 1;
 }
 
@@ -889,6 +899,7 @@ s32 BtlSeqIntroTalk_PreUpdate(BtlSeqTalkCtx *ctx) {
 #ifdef PORT
         if (Port_OmniFears(ctx->chara[0], ctx->chara[1])) {
             BtlCtrl_StartLosePose(ctx->side[0]); /* before the Omni King everyone but Goku cowers */
+            sOmniCowers[0] = 1;
         } else
 #endif
         BtlCtrl_StartEntrance(ctx->side[0]);
@@ -905,6 +916,7 @@ s32 BtlSeqIntroTalk_PreUpdate(BtlSeqTalkCtx *ctx) {
 #ifdef PORT
         if (Port_OmniFears(ctx->chara[1], ctx->chara[0])) {
             BtlCtrl_StartLosePose(ctx->side[1]);
+            sOmniCowers[1] = 1;
         } else
 #endif
         BtlCtrl_StartEntrance(ctx->side[1]);
@@ -928,7 +940,7 @@ s32 BtlSeqIntroTalk_Update(BtlSeqTalkCtx *ctx) {
     switch (ctx->step) {
     case 0:
     case 1:
-        if (BtlCtrl_IsPoseReached(ctx->side[0])) {
+        if (BtlCtrl_IsPoseReached(ctx->side[0]) PORT_OMNI_COWERS(0)) {
             if (Voice_IsStopped(ctx->side[0])) {
                 ScrXfade_RequestCapture();
                 ScrXfade_Start(1, 1.0f);
@@ -942,7 +954,7 @@ s32 BtlSeqIntroTalk_Update(BtlSeqTalkCtx *ctx) {
         break;
     case 2:
     case 3:
-        if (BtlCtrl_IsPoseReached(ctx->side[1])) {
+        if (BtlCtrl_IsPoseReached(ctx->side[1]) PORT_OMNI_COWERS(1)) {
             if (Voice_IsStopped(ctx->side[1]) || Ramp_Step(&ctx->timer)) {
                 ScrXfade_RequestCapture();
                 ScrXfade_Start(1, 1.0f);
@@ -1086,7 +1098,15 @@ s32 BtlSeqWinTalk_PreUpdate(BtlSeqTalkCtx *ctx) {
         } else {
             BtlCtrl_StartLosePose(ctx->side[0]);
             DemoCam_PlayObjAnim(ctx->side[0], 2);
+#ifdef PORT
+            sOmniCowers[0] = 1; /* the lose pose: an added fighter's may never report its end (see sOmniCowers) */
+#endif
         }
+#ifdef PORT
+        if (BattleResult_IsPlayerWin()) {
+            sOmniCowers[0] = 0;
+        }
+#endif
         Ramp_Start(&ctx->timer, 10.0f, 0.0f, 1.0f);
         Voice_PlayChara(ctx->side[0], ctx->chara[0], ctx->line[0]);
         BtlObj_SetSubState(BtlObj_Get(BattleSide_GetObjId(ctx->side[0])), 2, ctx->line[0]);
@@ -1107,7 +1127,7 @@ s32 BtlSeqWinTalk_Update(BtlSeqTalkCtx *ctx) {
     switch (ctx->step) {
     case 0:
     case 1:
-        if (BtlCtrl_IsPoseReached(ctx->side[0])) {
+        if (BtlCtrl_IsPoseReached(ctx->side[0]) PORT_OMNI_COWERS(0)) {
             if (Voice_IsStopped(ctx->side[0]) || Ramp_Step(&ctx->timer)) {
                 ctx->step = 2;
             }
