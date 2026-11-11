@@ -1556,9 +1556,17 @@ int Port_OmniDamage(int attacker, int defender, int damage, int healthMax, int *
     return healthMax / 100 * 55 + 10;
 }
 
+/* Whether the fighter cowers (the lose pose) before an omni fighter at the start of the fight. An added fighter with
+   animations of its own does not: its lose animation may loop and never report its end, which held the fight
+   before it began (Jiren or Beerus against Zeno); it makes its entrance as usual. */
 int Port_OmniFears(int chara, int other) {
+    const Chara *c;
     int base = chara >= PORT_CHARA_FIRST ? Port_CharaBase(chara) : chara;
-    return Port_CharaOmni(other) && !Port_CharaOmni(chara) && !(base >= 0 && base <= 11);
+    if (!Port_CharaOmni(other) || Port_CharaOmni(chara) || (base >= 0 && base <= 11)) {
+        return 0;
+    }
+    c = chara >= PORT_CHARA_FIRST ? chara_of(chara) : NULL;
+    return c == NULL || c->file[F_ANM][0] == '\0';
 }
 
 const char *Port_CharaName(int index) {
