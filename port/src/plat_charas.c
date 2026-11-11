@@ -1569,6 +1569,22 @@ int Port_OmniFears(int chara, int other) {
     return c == NULL || c->file[F_ANM][0] == '\0';
 }
 
+/* The action watchdog (BtlAct_Update), offline: whether a fighter has been in one attacker-side technique action
+   (0x105 the pose before an Ultimate Blast, 0x106..0x12F the Blast 2 and Ultimate actions, not the clash 0x130..
+   0x132 nor the victim's 0x133..0x13B) for longer than any technique lasts. An added fighter's animations in a
+   disc fighter's move slots can lack the frame or attribute a step waits for, and the fighter then stands in the
+   move for ever; the watchdog sends it back to neutral. 450 frames: 15 seconds at the battle's 30 frames, longer
+   than the longest cinematic Ultimate Blast. */
+#define WATCHDOG_FRAMES 450
+
+int Port_ActionWatchdog(int action, int frames) {
+    if (frames < WATCHDOG_FRAMES || action < 0x105 || action > 0x12F || Port_NetSession()) {
+        return 0;
+    }
+    fprintf(stderr, "bt3: watchdog: a fighter stood %d frames in technique action 0x%X; back to neutral\n", frames, action);
+    return 1;
+}
+
 const char *Port_CharaName(int index) {
     PortCharas_Init();
     return index >= 0 && index < live() ? sChara[index].name : "";

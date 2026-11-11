@@ -178,18 +178,40 @@ int sceMpegGetPicture(void *mp, void *rgb, int blocks) {
  *     group Name 0-11 198          a name for a set of character numbers
  *     Name|Other|Name's line|Other's line
  * The game's voice line plays as always; the text is shown over it (gs/ui.cpp). Not in an online session.
+ * Several lines for the same two groups: one of them is chosen at random for each fight.
+ *
+ * Lines during the fight, shown for a few seconds:
+ *     taunt:Name|Other|line         Name says it when Other falls to half health (Other * = anyone)
+ *     half:Name|Other|line          Name says it when Name falls to half health
+ *     low:Name|Other|line           Name says it when Name falls below a quarter
+ *     finish:Name|Other|line        Name says it on the hit that ends Other
+ * A line written for the pair is preferred to one for *; one of the matching lines is chosen at random.
  */
-#define STORY_GROUPS 96
-#define STORY_RANGES 8
-#define STORY_PAIRS 1024
+#include <time.h>
+#define STORY_GROUPS 128
+#define STORY_RANGES 12
+#define STORY_PAIRS 2048
+#define STORY_EVENTS 2048
 #define STORY_TEXT 240
+#define STORY_SHOW_MS 4500
 typedef struct { char name[24]; int count, lo[STORY_RANGES], hi[STORY_RANGES]; } StoryGroup;
 typedef struct { int a, b; char lineA[STORY_TEXT], lineB[STORY_TEXT]; } StoryPair;
+enum { EV_TAUNT, EV_HALF, EV_LOW, EV_FINISH, EV_KINDS };
+typedef struct { int kind, a, b; char line[STORY_TEXT]; } StoryEvent; /* b: -1 for anyone */
 static StoryGroup *sStoryGroups;
 static StoryPair *sStoryPairs;
-static int sStoryGroupCount, sStoryPairCount, sStoryLoaded;
+static StoryEvent *sStoryEvents;
+static int sStoryGroupCount, sStoryPairCount, sStoryEventCount, sStoryLoaded;
 static char sStoryNow[STORY_TEXT + 32];
+static uint64_t sStoryUntil; /* 0: shown until cleared (the entrance lines); else the time it goes, in ms */
+static int sStoryPick = -1, sStoryPickA, sStoryPickB; /* the pair chosen for the first speaker, for the second */
 static pthread_mutex_t sStoryLock = PTHREAD_MUTEX_INITIALIZER;
+
+static uint64_t story_now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000);
+}
 
 static int story_find(const char *name) {
     int i;
@@ -219,11 +241,48 @@ static void story_group(char *line) {
     }
 }
 
+/* "kind:Name|Other|line" */
+static void story_event(int kind, char *line) {
+    char *f[3];
+    int i;
+    StoryEvent *e;
+
+    f[0] = line;
+    for (i = 1; i < 3; i++) {
+        f[i] = strchr(f[i - 1], '|');
+        if (f[i] == NULL) {
+            return;
+        }
+        *f[i]++ = '\0';
+    }
+    f[2][strcspn(f[2], "\r\n")] = '\0';
+    if (sStoryEventCount >= STORY_EVENTS || story_find(f[0]) < 0 || f[2][0] == '\0') {
+        return;
+    }
+    e = &sStoryEvents[sStoryEventCount];
+    e->kind = kind;
+    e->a = story_find(f[0]);
+    e->b = strcmp(f[1], "*") == 0 ? -1 : story_find(f[1]);
+    if (e->b < 0 && strcmp(f[1], "*") != 0) {
+        return; /* an unknown name */
+    }
+    snprintf(e->line, sizeof(e->line), "%s", f[2]);
+    sStoryEventCount++;
+}
+
 static void story_pair(char *line) {
     char *f[4];
     int i;
     StoryPair *p;
+    static const char *const kinds[EV_KINDS] = {"taunt:", "half:", "low:", "finish:"};
 
+    for (i = 0; i < EV_KINDS; i++) {
+        size_t n = strlen(kinds[i]);
+        if (strncmp(line, kinds[i], n) == 0) {
+            story_event(i, line + n);
+            return;
+        }
+    }
     f[0] = line;
     for (i = 1; i < 4; i++) {
         f[i] = strchr(f[i - 1], '|');
@@ -254,7 +313,9 @@ static void story_load(void) {
     }
     sStoryGroups = calloc(STORY_GROUPS, sizeof(StoryGroup));
     sStoryPairs = calloc(STORY_PAIRS, sizeof(StoryPair));
-    if (sStoryGroups != NULL && sStoryPairs != NULL) {
+    sStoryEvents = calloc(STORY_EVENTS, sizeof(StoryEvent));
+    srand((unsigned)story_now_ms());
+    if (sStoryGroups != NULL && sStoryPairs != NULL && sStoryEvents != NULL) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             if (strncmp(line, "group ", 6) == 0) {
                 story_group(line + 6);
@@ -264,7 +325,8 @@ static void story_load(void) {
         }
     }
     fclose(fp);
-    fprintf(stderr, "bt3: story talk: %d groups, %d pairs\n", sStoryGroupCount, sStoryPairCount);
+    fprintf(stderr, "bt3: story talk: %d groups, %d pairs, %d lines during fights\n", sStoryGroupCount, sStoryPairCount,
+            sStoryEventCount);
 }
 
 static int story_group_of(int chara) {
@@ -282,6 +344,7 @@ static int story_group_of(int chara) {
 void Port_StoryTalkClear(void) {
     pthread_mutex_lock(&sStoryLock);
     sStoryNow[0] = '\0';
+    sStoryUntil = 0;
     pthread_mutex_unlock(&sStoryLock);
 }
 
@@ -310,17 +373,94 @@ void Port_StoryTalkSay(int speaker, int other) {
     if (a < 0 || b < 0) {
         return;
     }
-    for (i = 0; i < sStoryPairCount && text == NULL; i++) {
-        if (sStoryPairs[i].a == a && sStoryPairs[i].b == b) {
-            text = sStoryPairs[i].lineA;
-        } else if (sStoryPairs[i].a == b && sStoryPairs[i].b == a) {
-            text = sStoryPairs[i].lineB;
+    if (sStoryPick >= 0 && sStoryPickA == b && sStoryPickB == a) {
+        i = sStoryPick; /* the second speaker answers with the same pair */
+        text = sStoryPairs[i].a == a ? sStoryPairs[i].lineA : sStoryPairs[i].lineB;
+        sStoryPick = -1;
+    } else {
+        int n = 0, chosen = -1;
+        for (i = 0; i < sStoryPairCount; i++) {
+            if ((sStoryPairs[i].a == a && sStoryPairs[i].b == b) || (sStoryPairs[i].a == b && sStoryPairs[i].b == a)) {
+                if (rand() % ++n == 0) { /* each of the n matching pairs is kept with chance 1/n */
+                    chosen = i;
+                }
+            }
+        }
+        sStoryPick = chosen;
+        sStoryPickA = a;
+        sStoryPickB = b;
+        if (chosen >= 0) {
+            text = sStoryPairs[chosen].a == a ? sStoryPairs[chosen].lineA : sStoryPairs[chosen].lineB;
         }
     }
     if (text != NULL && text[0] != '\0') { /* (an empty line: nothing shown, for a voice with no matching words) */
         pthread_mutex_lock(&sStoryLock);
         snprintf(sStoryNow, sizeof(sStoryNow), "%s: %s", sStoryGroups[a].name, text);
+        sStoryUntil = 0;
         pthread_mutex_unlock(&sStoryLock);
+    }
+}
+
+/* One line of the kind for the speaker against the other, if the file has one (a pair's own line first). */
+static int story_say_event(int kind, int speaker, int other) {
+    int a = story_group_of(speaker), b = story_group_of(other), i, n = 0, chosen = -1, pass;
+
+    if (a < 0) {
+        return 0;
+    }
+    for (pass = 0; pass < 2 && chosen < 0; pass++) {
+        for (i = 0; i < sStoryEventCount; i++) {
+            const StoryEvent *e = &sStoryEvents[i];
+            if (e->kind == kind && e->a == a && (pass == 0 ? (b >= 0 && e->b == b) : e->b == -1)) {
+                if (rand() % ++n == 0) {
+                    chosen = i;
+                }
+            }
+        }
+    }
+    if (chosen < 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&sStoryLock);
+    snprintf(sStoryNow, sizeof(sStoryNow), "%s: %s", sStoryGroups[a].name, sStoryEvents[chosen].line);
+    sStoryUntil = story_now_ms() + STORY_SHOW_MS;
+    pthread_mutex_unlock(&sStoryLock);
+    return 1;
+}
+
+/* A hit took `defender` from `before` to `after` health (of `max`): the lines during the fight. Each fires once per
+   fighter until its health is full again (a new fight). */
+void Port_StoryFightHit(int attacker, int defender, int before, int after, int max) {
+    static int seen[1024];
+    int *s;
+
+    if (Port_NetSession() || max <= 0 || defender < 0 || defender >= 1024 || attacker < 0) {
+        return;
+    }
+    if (!sStoryLoaded) {
+        story_load();
+    }
+    if (sStoryEventCount == 0) {
+        return;
+    }
+    s = &seen[defender];
+    if (before >= max) {
+        *s = 0;
+    }
+    if (after <= 0 && before > 0) {
+        story_say_event(EV_FINISH, attacker, defender);
+    } else if (!(*s & 2) && before * 4 > max && after * 4 <= max) {
+        *s |= 2 | 1;
+        story_say_event(EV_LOW, defender, attacker);
+    } else if (!(*s & 1) && before * 2 > max && after * 2 <= max) {
+        *s |= 1;
+        if (rand() & 1) { /* the one who landed it gloats, or the one hit answers; the other if the first has nothing */
+            if (!story_say_event(EV_TAUNT, attacker, defender)) {
+                story_say_event(EV_HALF, defender, attacker);
+            }
+        } else if (!story_say_event(EV_HALF, defender, attacker)) {
+            story_say_event(EV_TAUNT, attacker, defender);
+        }
     }
 }
 
@@ -328,6 +468,10 @@ int Port_StoryText(char *out, int size) {
     int on;
 
     pthread_mutex_lock(&sStoryLock);
+    if (sStoryUntil != 0 && story_now_ms() >= sStoryUntil) {
+        sStoryNow[0] = '\0';
+        sStoryUntil = 0;
+    }
     on = sStoryNow[0] != '\0';
     if (on) {
         snprintf(out, (size_t)size, "%s", sStoryNow);

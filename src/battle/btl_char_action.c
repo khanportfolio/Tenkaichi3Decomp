@@ -148,6 +148,9 @@ extern void BtlObj_AddSway(void *obj, f32 a, f32 b);
 
 extern BtlActRoster *gBtlChars;
 extern BtlActHandler gBtlActHandlers[BTLACT_COUNT];
+#ifdef PORT
+extern int Port_ActionWatchdog(int action, int frames); /* plat_charas.c */
+#endif
 
 /* Requests the action to switch to at the next dispatch (-1 is ignored). */
 void BtlAct_Request(BtlActChr *chr, s32 id) {
@@ -1170,6 +1173,11 @@ void BtlAct_Update(BtlActChr *chr) {
         tbl[act->current](chr, BTLACT_PHASE_DECIDE);
     }
     BtlAct_CheckForced(chr);
+#ifdef PORT
+    if (act->request == -1 && Port_ActionWatchdog(act->current, chr->actionFrame)) {
+        act->request = 0xB; /* a technique that never ends (an added fighter's animations): back to neutral */
+    }
+#endif
     if (act->request != -1) {
         if (tbl[act->current] != NULL) {
             tbl[act->current](chr, BTLACT_PHASE_LEAVE);
