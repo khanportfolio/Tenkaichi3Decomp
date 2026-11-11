@@ -130,7 +130,6 @@ extern s32 BtlSkill_GetFrames(HitChr *chr, s32 dir);
 #ifdef PORT
 extern s32 BtlCharApi_GetChara(s32 objId);
 extern int Port_OmniDamage(int attacker, int defender, int damage, int healthMax, int *exact); /* plat_charas.c */
-extern void Port_StoryFightHit(int attacker, int defender, int before, int after, int max); /* plat_movie.c */
 #endif
 extern f32 BtlCharApi_GetHeight(s32 objId);                             /* body size, obj + 0xFF4 */
 extern f32 BtlCharApi_GetRadius(s32 objId);                             /* body radius */
@@ -1406,17 +1405,7 @@ void BtlHit_ApplyHit(HitChr *atk) {
             }
         }
 #endif
-#ifdef PORT
-        {
-            s32 before = BtlMember_GetActiveGauge(def)->health;
-
-            BtlMember_Damage(def, dmg, type);
-            Port_StoryFightHit(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), before,
-                               BtlMember_GetActiveGauge(def)->health, BtlMember_GetActiveGauge(def)->healthMax);
-        }
-#else
         BtlMember_Damage(def, dmg, type);
-#endif
         break;
     }
     }

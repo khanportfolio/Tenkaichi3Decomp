@@ -30,6 +30,11 @@
  */
 
 extern void *memset(void *dst, s32 c, u32 n);
+#ifdef PORT
+extern s32 BtlCharApi_GetChara(s32 objId);
+extern s32 BattleSide_GetObjId(s32 side);
+extern void Port_StoryFightHit(int attacker, int defender, int before, int after, int max); /* plat_movie.c */
+#endif
 extern s32 BtlUtil_Clamp(s32 v, s32 lo, s32 hi);
 extern s32 BtlUtil_Min(s32 a, s32 b);
 extern s32 BtlUtil_Max(s32 a, s32 b);
@@ -509,6 +514,11 @@ s32 BtlMember_Damage(BtlMemberChr *chr, s32 amount, s32 flags) {
             }
         }
     }
+#ifdef PORT
+    /* every kind of damage (blows, ki blasts, beams, rushes) passes here: the story lines during the fight */
+    Port_StoryFightHit(BtlCharApi_GetChara(BattleSide_GetObjId(BtlOpp_GetPlayer(chr))), BtlCharApi_GetChara(chr->objId),
+                       before, health, g->healthMax);
+#endif
     return before - health;
 }
 
