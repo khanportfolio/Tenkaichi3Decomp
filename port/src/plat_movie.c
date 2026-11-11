@@ -207,6 +207,19 @@ static uint64_t sStoryUntil; /* 0: shown until cleared (the entrance lines); els
 static int sStoryPick = -1, sStoryPickA, sStoryPickB; /* the pair chosen for the first speaker, for the second */
 static pthread_mutex_t sStoryLock = PTHREAD_MUTEX_INITIALIZER;
 
+static uint64_t story_now_ms(void);
+/* The talk's own random numbers: the game's rand() drives the fights (and replays), so it is not touched here. */
+static uint32_t sStorySeed;
+static int story_rand(void) {
+    if (sStorySeed == 0) {
+        sStorySeed = (uint32_t)story_now_ms() | 1u;
+    }
+    sStorySeed ^= sStorySeed << 13;
+    sStorySeed ^= sStorySeed >> 17;
+    sStorySeed ^= sStorySeed << 5;
+    return (int)(sStorySeed >> 1);
+}
+
 static uint64_t story_now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -314,7 +327,6 @@ static void story_load(void) {
     sStoryGroups = calloc(STORY_GROUPS, sizeof(StoryGroup));
     sStoryPairs = calloc(STORY_PAIRS, sizeof(StoryPair));
     sStoryEvents = calloc(STORY_EVENTS, sizeof(StoryEvent));
-    srand((unsigned)story_now_ms());
     if (sStoryGroups != NULL && sStoryPairs != NULL && sStoryEvents != NULL) {
         while (fgets(line, sizeof(line), fp) != NULL) {
             if (strncmp(line, "group ", 6) == 0) {
@@ -381,7 +393,7 @@ void Port_StoryTalkSay(int speaker, int other) {
         int n = 0, chosen = -1;
         for (i = 0; i < sStoryPairCount; i++) {
             if ((sStoryPairs[i].a == a && sStoryPairs[i].b == b) || (sStoryPairs[i].a == b && sStoryPairs[i].b == a)) {
-                if (rand() % ++n == 0) { /* each of the n matching pairs is kept with chance 1/n */
+                if (story_rand() % ++n == 0) { /* each of the n matching pairs is kept with chance 1/n */
                     chosen = i;
                 }
             }
@@ -412,7 +424,7 @@ static int story_say_event(int kind, int speaker, int other) {
         for (i = 0; i < sStoryEventCount; i++) {
             const StoryEvent *e = &sStoryEvents[i];
             if (e->kind == kind && e->a == a && (pass == 0 ? (b >= 0 && e->b == b) : e->b == -1)) {
-                if (rand() % ++n == 0) {
+                if (story_rand() % ++n == 0) {
                     chosen = i;
                 }
             }
@@ -454,7 +466,7 @@ void Port_StoryFightHit(int attacker, int defender, int before, int after, int m
         story_say_event(EV_LOW, defender, attacker);
     } else if (!(*s & 1) && before * 2 > max && after * 2 <= max) {
         *s |= 1;
-        if (rand() & 1) { /* the one who landed it gloats, or the one hit answers; the other if the first has nothing */
+        if (story_rand() & 1) { /* the one who landed it gloats, or the one hit answers; the other if the first has nothing */
             if (!story_say_event(EV_TAUNT, attacker, defender)) {
                 story_say_event(EV_HALF, defender, attacker);
             }
