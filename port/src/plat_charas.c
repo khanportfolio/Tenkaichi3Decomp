@@ -1577,8 +1577,14 @@ int Port_OmniFears(int chara, int other) {
    than the longest cinematic Ultimate Blast. */
 #define WATCHDOG_FRAMES 450
 
+/* The scripted hit sequence of a rush technique (0x12D..0x12F) is shorter: an added fighter's animation that never
+   reports the end of a step replays the hits over and over (Goku Ultra Instinct Sign's rush ran to 41 hits). */
+#define WATCHDOG_RUSH_FRAMES 300
+
 int Port_ActionWatchdog(int action, int frames) {
-    if (frames < WATCHDOG_FRAMES || action < 0x105 || action > 0x12F || Port_NetSession()) {
+    int limit = action >= 0x12D && action <= 0x12F ? WATCHDOG_RUSH_FRAMES : WATCHDOG_FRAMES;
+
+    if (frames < limit || action < 0x105 || action > 0x12F || Port_NetSession()) {
         return 0;
     }
     fprintf(stderr, "bt3: watchdog: a fighter stood %d frames in technique action 0x%X; back to neutral\n", frames, action);
