@@ -35,6 +35,7 @@ extern s32 BtlCharApi_GetChara(s32 objId);
 extern s32 BattleSide_GetObjId(s32 side);
 extern int Port_StoryFightHit(int attacker, int defender, int side, int before, int after, int max); /* plat_movie.c */
 extern void BtlChar_PlayVoice(BtlMemberChr *chr, s32 kind);
+extern void Port_ActionHit(int attackerSide); /* plat_charas.c: the action watchdog counts a rush's hits */
 #endif
 extern s32 BtlUtil_Clamp(s32 v, s32 lo, s32 hi);
 extern s32 BtlUtil_Min(s32 a, s32 b);
@@ -524,6 +525,9 @@ s32 BtlMember_Damage(BtlMemberChr *chr, s32 amount, s32 flags) {
 
         if (said >= 0) {
             BtlChar_PlayVoice((said & 0x100) ? BtlChar_Get(BtlOpp_GetPlayer(chr)) : chr, said & 0xFF);
+        }
+        if (before > health) {
+            Port_ActionHit(BtlOpp_GetPlayer(chr));
         }
     }
 #endif

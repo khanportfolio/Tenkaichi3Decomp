@@ -149,7 +149,7 @@ extern void BtlObj_AddSway(void *obj, f32 a, f32 b);
 extern BtlActRoster *gBtlChars;
 extern BtlActHandler gBtlActHandlers[BTLACT_COUNT];
 #ifdef PORT
-extern int Port_ActionWatchdog(int action, int frames); /* plat_charas.c */
+extern int Port_ActionWatchdog(int side, int action, int frames); /* plat_charas.c */
 #endif
 
 /* Requests the action to switch to at the next dispatch (-1 is ignored). */
@@ -1174,7 +1174,7 @@ void BtlAct_Update(BtlActChr *chr) {
     }
     BtlAct_CheckForced(chr);
 #ifdef PORT
-    if (act->request == -1 && Port_ActionWatchdog(act->current, chr->actionFrame)) {
+    if (act->request == -1 && Port_ActionWatchdog(chr->side, act->current, chr->actionFrame)) {
         act->request = 0xB; /* a technique that never ends (an added fighter's animations): back to neutral */
     }
 #endif

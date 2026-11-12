@@ -1601,10 +1601,37 @@ int Port_OmniFears(int chara, int other) {
    reports the end of a step replays the hits over and over (Goku Ultra Instinct Sign's rush ran to 41 hits). */
 #define WATCHDOG_RUSH_FRAMES 300
 
-int Port_ActionWatchdog(int action, int frames) {
-    int limit = action >= 0x12D && action <= 0x12F ? WATCHDOG_RUSH_FRAMES : WATCHDOG_FRAMES;
+/* A rush whose hits are over but whose action never ends: once the scripted sequence has landed hits and then none
+   for WATCHDOG_RUSH_QUIET frames (2.5 s), it is over. Seen with Goku Ultra Instinct's BT4 Meteor Smash: 26 hits, then
+   both fighters stood with the clock stopped until the 10 s limit. The start of a rush (its cinematic, before the
+   first hit) is never cut by this: it needs a hit first. Hits are counted per side from BtlMember_Damage. */
+#define WATCHDOG_RUSH_QUIET 75
+static int sRushHits[2], sRushQuiet[2];
 
-    if (frames < limit || action < 0x105 || action > 0x12F || Port_NetSession()) {
+void Port_ActionHit(int attackerSide) {
+    if (attackerSide == 0 || attackerSide == 1) {
+        sRushHits[attackerSide]++;
+        sRushQuiet[attackerSide] = 0;
+    }
+}
+
+int Port_ActionWatchdog(int side, int action, int frames) {
+    int rush = action >= 0x12D && action <= 0x12F, limit = rush ? WATCHDOG_RUSH_FRAMES : WATCHDOG_FRAMES;
+
+    if (Port_NetSession()) {
+        return 0;
+    }
+    if (side == 0 || side == 1) {
+        if (!rush) {
+            sRushHits[side] = sRushQuiet[side] = 0;
+        } else if (sRushHits[side] > 0 && ++sRushQuiet[side] >= WATCHDOG_RUSH_QUIET) {
+            fprintf(stderr, "bt3: watchdog: a rush (action 0x%X) landed %d hits, then none for %d frames; back to neutral\n", action,
+                    sRushHits[side], sRushQuiet[side]);
+            sRushHits[side] = sRushQuiet[side] = 0;
+            return 1;
+        }
+    }
+    if (frames < limit || action < 0x105 || action > 0x12F) {
         return 0;
     }
     fprintf(stderr, "bt3: watchdog: a fighter stood %d frames in technique action 0x%X; back to neutral\n", frames, action);
