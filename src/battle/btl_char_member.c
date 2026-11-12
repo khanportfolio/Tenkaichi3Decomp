@@ -33,7 +33,8 @@ extern void *memset(void *dst, s32 c, u32 n);
 #ifdef PORT
 extern s32 BtlCharApi_GetChara(s32 objId);
 extern s32 BattleSide_GetObjId(s32 side);
-extern void Port_StoryFightHit(int attacker, int defender, int before, int after, int max); /* plat_movie.c */
+extern int Port_StoryFightHit(int attacker, int defender, int side, int before, int after, int max); /* plat_movie.c */
+extern void BtlChar_PlayVoice(BtlMemberChr *chr, s32 kind);
 #endif
 extern s32 BtlUtil_Clamp(s32 v, s32 lo, s32 hi);
 extern s32 BtlUtil_Min(s32 a, s32 b);
@@ -515,9 +516,16 @@ s32 BtlMember_Damage(BtlMemberChr *chr, s32 amount, s32 flags) {
         }
     }
 #ifdef PORT
-    /* every kind of damage (blows, ki blasts, beams, rushes) passes here: the story lines during the fight */
-    Port_StoryFightHit(BtlCharApi_GetChara(BattleSide_GetObjId(BtlOpp_GetPlayer(chr))), BtlCharApi_GetChara(chr->objId),
-                       before, health, g->healthMax);
+    /* every kind of damage (blows, ki blasts, beams, rushes) passes here: the story lines during the fight, said in
+       the speaker's own voice (a shout of theirs from the disc; 0x100 = the attacker speaks) */
+    {
+        s32 said = Port_StoryFightHit(BtlCharApi_GetChara(BattleSide_GetObjId(BtlOpp_GetPlayer(chr))),
+                                      BtlCharApi_GetChara(chr->objId), chr->side, before, health, g->healthMax);
+
+        if (said >= 0) {
+            BtlChar_PlayVoice((said & 0x100) ? BtlChar_Get(BtlOpp_GetPlayer(chr)) : chr, said & 0xFF);
+        }
+    }
 #endif
     return before - health;
 }

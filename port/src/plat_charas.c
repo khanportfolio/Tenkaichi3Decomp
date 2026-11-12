@@ -782,6 +782,25 @@ static Chara *scan(const char *root, const char *name, const Chara *owner) {
     return kept;
 }
 
+/* A folder kept aside, never a package or a form: "unused" and names starting "backup" or "before-" (copies of a
+   package's old files; one with a character.txt in it was loaded as a fighter of its own, which moved every later
+   fighter's number and used up places). */
+static int set_aside(const char *name) {
+    static const char *const kPrefix[] = {"backup", "before-"};
+    size_t k, i;
+    if (same_nocase(name, "unused")) {
+        return 1;
+    }
+    for (k = 0; k < sizeof(kPrefix) / sizeof(kPrefix[0]); k++) {
+        for (i = 0; kPrefix[k][i] != '\0' && name[i] != '\0' && (name[i] | 0x20) == kPrefix[k][i]; i++) {
+        }
+        if (kPrefix[k][i] == '\0') {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* the folders inside `dir`, by name (the same order on every machine); `skip`: the two voice folders */
 static int folders(const char *dir, char names[][128], int max, int skip) {
     DIR *d = opendir(dir);
@@ -793,7 +812,8 @@ static int folders(const char *dir, char names[][128], int max, int skip) {
     while ((de = readdir(d)) != NULL && n < max) {
         char path[600];
         struct stat st;
-        if (de->d_name[0] != '.' && strlen(de->d_name) < 64 && !(skip && (same_nocase(de->d_name, "voice_us") || same_nocase(de->d_name, "voice_jp"))) &&
+        if (de->d_name[0] != '.' && strlen(de->d_name) < 64 && !set_aside(de->d_name) &&
+            !(skip && (same_nocase(de->d_name, "voice_us") || same_nocase(de->d_name, "voice_jp"))) &&
             join(path, sizeof(path), dir, de->d_name) && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
             /* (folders only: a file beside them, load_order.txt above all, is no package, and was written into the
                load order as one) */

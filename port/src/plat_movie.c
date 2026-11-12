@@ -440,40 +440,53 @@ static int story_say_event(int kind, int speaker, int other) {
     return 1;
 }
 
-/* A hit took `defender` from `before` to `after` health (of `max`): the lines during the fight. Each fires once per
-   fighter until its health is full again (a new fight). */
-void Port_StoryFightHit(int attacker, int defender, int before, int after, int max) {
-    static int seen[1024];
+/* A hit took the fighter of side `side` (`defender`) from `before` to `after` health (of `max`): the lines during the
+   fight. Each fires once per side until its health is full again (a new fight); kept per side, not per character, so
+   in a match of a character against itself both get theirs.
+   The speaker says it in their own voice: the result is -1 (nothing said) or the voice kind the caller plays,
+   with STORY_BY_ATTACKER set when the attacker speaks. Kinds are the clash shouts of the fighter's own 100 lines:
+   0x15 (winning a clash: a battle cry) for taunts and the finishing blow, 0x16 (losing one: a pained cry) for the
+   lines of the one hit. */
+#define STORY_BY_ATTACKER 0x100
+int Port_StoryFightHit(int attacker, int defender, int side, int before, int after, int max) {
+    static int seen[2];
     int *s;
 
-    if (Port_NetSession() || max <= 0 || defender < 0 || defender >= 1024 || attacker < 0) {
-        return;
+    if (Port_NetSession() || max <= 0 || defender < 0 || attacker < 0 || side < 0 || side > 1) {
+        return -1;
     }
     if (!sStoryLoaded) {
         story_load();
     }
     if (sStoryEventCount == 0) {
-        return;
+        return -1;
     }
-    s = &seen[defender];
+    s = &seen[side];
     if (before >= max) {
         *s = 0;
     }
     if (after <= 0 && before > 0) {
-        story_say_event(EV_FINISH, attacker, defender);
+        return story_say_event(EV_FINISH, attacker, defender) ? STORY_BY_ATTACKER | 0x15 : -1;
     } else if (!(*s & 2) && before * 4 > max && after * 4 <= max) {
         *s |= 2 | 1;
-        story_say_event(EV_LOW, defender, attacker);
+        return story_say_event(EV_LOW, defender, attacker) ? 0x16 : -1;
     } else if (!(*s & 1) && before * 2 > max && after * 2 <= max) {
         *s |= 1;
-        if (story_rand() & 1) { /* the one who landed it gloats, or the one hit answers; the other if the first has nothing */
-            if (!story_say_event(EV_TAUNT, attacker, defender)) {
-                story_say_event(EV_HALF, defender, attacker);
+        /* the one who landed it gloats, or the one hit answers; the other if the first has nothing. Picked from the
+           health (not story_rand): which fighter shouts touches the fight's state (voice cooldowns, the lip track's
+           draw of rand()), so a replay of the fight must pick the same one. */
+        if ((after / 10) & 1) {
+            if (story_say_event(EV_TAUNT, attacker, defender)) {
+                return STORY_BY_ATTACKER | 0x15;
             }
-        } else if (!story_say_event(EV_HALF, defender, attacker)) {
-            story_say_event(EV_TAUNT, attacker, defender);
+            return story_say_event(EV_HALF, defender, attacker) ? 0x16 : -1;
         }
+        if (story_say_event(EV_HALF, defender, attacker)) {
+            return 0x16;
+        }
+        return story_say_event(EV_TAUNT, attacker, defender) ? STORY_BY_ATTACKER | 0x15 : -1;
     }
+    return -1;
 }
 
 int Port_StoryText(char *out, int size) {

@@ -2324,6 +2324,9 @@ static void meter_count(void) { // once per frame shown
     } else if (now - t0 >= 500) {
         sFps = (float)frames * 1000.0f / (float)(now - t0);
         sSpeed = (float)(gPortLiveBlanks - blanks0) * 1000.0f / (float)(now - t0) / 60.0f * 100.0f;
+        if (getenv("BT3_FPS_LOG") != NULL) { // testing: the meter's numbers in the log, every half second
+            fprintf(stderr, "bt3: meter: %.1f fps, speed %.1f%%\n", sFps, sSpeed);
+        }
         frames = 0;
         blanks0 = gPortLiveBlanks;
         t0 = now;
