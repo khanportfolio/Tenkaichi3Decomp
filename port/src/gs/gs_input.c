@@ -6,7 +6,8 @@
  * Each player has: one key per action (the 16 buttons and the 8 stick directions), one controller button or
  * trigger per pad button, and a controller slot (the n-th connected controller, or none). Defaults:
  *   player 1   first controller; arrows = d-pad, W A S D = left stick, Enter = START, Right Shift = SELECT,
- *              K = cross, L = circle, J = square, I = triangle, U = L1, O = R1, 7 = L2, 9 = R2
+ *              K = cross, L = circle, J = square, I = triangle, U = L1, O = R1, 7 = L2, 9 = R2;
+ *              in a fight also the right mouse button = L2 (charge) and the left mouse button = triangle
  *   player 2   second controller, no keys
  *   controller the usual layout (south = cross, east = circle, west = square, north = triangle, triggers = L2 / R2)
  * The sticks of a controller are passed through, or given a round deadzone first (stick_bytes, below). The pressure
@@ -55,6 +56,11 @@ static const struct { const char *name, *label; unsigned bit; int key; int pad; 
 };
 
 static int sKeys[2][PORT_ACTIONS], sPadBtn[2][PORT_PAD_BUTTONS], sPadSlot[2];
+/* Mouse buttons beside the keys (setting mouse_p1_<button> = 1 left, 2 middle, 3 right, 4 / 5 the side buttons,
+   0 none). Player 1's defaults: the right button is L2 (held, it charges power) and the left button Triangle, so
+   W A S D (the left stick) + right button + left click fire the specials. They count only in a fight: in the menus
+   a click (bringing the window to the front) would be Triangle, which goes back. */
+static int sMouse[2][PORT_PAD_BUTTONS];
 /* Per player: the deadzone of the left and of the right stick (-1 = the game's own, as the pad's bytes always were
    passed; 0..PORT_DEADZONE_MAX = a round one of that many percent, stick_bytes below), and vibration (on, strength
    in percent). */
@@ -75,6 +81,8 @@ static void defaults(int player) {
         sKeys[player][a] = player == 0 ? kActions[a].key : 0;
         if (a < PORT_PAD_BUTTONS) {
             sPadBtn[player][a] = kActions[a].pad;
+            sMouse[player][a] = player == 0 && kActions[a].bit == B_L2 ? SDL_BUTTON_RIGHT :
+                                player == 0 && kActions[a].bit == B_TRIANGLE ? SDL_BUTTON_LEFT : 0;
         }
     }
     sPadSlot[player] = player;
@@ -99,6 +107,8 @@ static void load(void) {
             if (a < PORT_PAD_BUTTONS) {
                 snprintf(name, sizeof(name), "pad_p%d_%s", p + 1, kActions[a].name);
                 sPadBtn[p][a] = Port_Setting(name, sPadBtn[p][a]);
+                snprintf(name, sizeof(name), "mouse_p%d_%s", p + 1, kActions[a].name);
+                sMouse[p][a] = range(Port_Setting(name, sMouse[p][a]), 0, 5);
             }
         }
         snprintf(name, sizeof(name), "padslot_p%d", p + 1);
@@ -385,6 +395,8 @@ void PortInput_Save(void) {
             if (a < PORT_PAD_BUTTONS) {
                 snprintf(name, sizeof(name), "pad_p%d_%s", p + 1, kActions[a].name);
                 Port_SettingSave(name, sPadBtn[p][a]);
+                snprintf(name, sizeof(name), "mouse_p%d_%s", p + 1, kActions[a].name);
+                Port_SettingSave(name, sMouse[p][a]);
             }
         }
         snprintf(name, sizeof(name), "padslot_p%d", p + 1);
@@ -1056,6 +1068,17 @@ int Port_PadRead(int socket, unsigned char *data) {
         if (HELD(22)) { rx = 0x00; }
         if (HELD(23)) { rx = 0xFF; }
 #undef HELD
+        {   /* the mouse buttons (sMouse), in a fight only */
+            extern void *BtlChar_FindByObjId(int objId);
+            SDL_MouseButtonFlags mb = SDL_GetMouseState(NULL, NULL);
+            if (mb != 0 && BtlChar_FindByObjId(0) != NULL) {
+                for (a = 0; a < PORT_PAD_BUTTONS; a++) {
+                    if (sMouse[socket][a] > 0 && (mb & SDL_BUTTON_MASK(sMouse[socket][a]))) {
+                        btn |= kActions[a].bit;
+                    }
+                }
+            }
+        }
     }
     if (socket == 0) {
         btn |= script_buttons();
