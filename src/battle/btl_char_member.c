@@ -669,18 +669,23 @@ void BtlMember_SetMaxPower(BtlMemberChr *chr, s32 value) {
 
 #ifdef PORT
 /* BT3_TEST_FULL=1 (testing only, never in normal play): side 0's ki, blast stock and powered-up mode stay full, so
-   every special and ultimate can be fired at once and again (BtlCtrl_SetMaxPower's way: ki, timer, held flag 6).
+   every special and ultimate can be fired at once and again (BtlCtrl_SetMaxPower's way: ki, timer, held flag 6);
+   side 1's health stays full.
    Called for every fighter each frame from BtlAct_Update. */
 extern int Port_TestFull(void); /* plat_charas.c */
 extern void BtlChar_SetHeldFlag(BtlMemberChr *chr, s32 bit);
 void BtlMember_TestFull(BtlMemberChr *chr) {
     BtlMemberGauge *g;
 
-    if (chr->side != 0 || !Port_TestFull()) {
+    if ((chr->side != 0 && chr->side != 1) || !Port_TestFull()) {
         return;
     }
     g = BtlMember_GetActiveGauge(chr);
     if (g->health <= 0) {
+        return;
+    }
+    if (chr->side == 1) { /* the opponent is never knocked out, so the test runs all its rounds */
+        g->health = g->healthMax;
         return;
     }
     g->ki = g->kiMax;
