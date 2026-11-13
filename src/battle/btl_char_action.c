@@ -1,5 +1,8 @@
 #include "common.h"
 #include "battle/btl_char_action.h"
+#ifdef PORT
+#include <stdio.h>
+#endif
 
 /*
  * Fighter action state machine, core part: 0x1E0290..0x1E3158.
@@ -1176,8 +1179,40 @@ void BtlAct_Update(BtlActChr *chr) {
     }
     BtlAct_CheckForced(chr);
 #ifdef PORT
-    if (act->request == -1 && Port_ActionWatchdog(chr->side, act->current, chr->actionFrame)) {
-        act->request = 0xB; /* a technique that never ends (an added fighter's animations): back to neutral */
+    {
+        /* A technique that never ends (an added fighter's animations). First the action is told it is finished
+           (work[1], the mark every technique's decide phase waits for), so it ends its own way: the clock and the
+           camera released, the victim of a rush landing and getting up (it is told too). Cutting it straight to
+           neutral left the rush victim, the stopped clock and the cinematic camera behind: the fight froze. Only if
+           the action still has not ended 60 frames later is the fighter sent to neutral 0xB. */
+        static int sEndAt[2] = {-1, -1}, sVictim[2];
+        int s = chr->side;
+
+        if ((s == 0 || s == 1) && sVictim[s]) {
+            if (act->current >= 0x133 && act->current <= 0x13B && act->request == -1) {
+                chr->work[1] = 1;
+            }
+            sVictim[s] = 0;
+        }
+        if (act->request == -1 && !((s == 0 || s == 1) && sEndAt[s] >= 0) && Port_ActionWatchdog(s, act->current, chr->actionFrame)) {
+            if ((s == 0 || s == 1) && sEndAt[s] < 0) {
+                chr->work[1] = 1;
+                sVictim[s ^ 1] = 1;
+                sEndAt[s] = chr->actionFrame;
+                fprintf(stderr, "bt3: watchdog: action 0x%X told to finish\n", act->current);
+            } else {
+                act->request = 0xB;
+            }
+        }
+        if (s == 0 || s == 1) {
+            if (act->request != -1 || act->current < 0x105 || act->current > 0x12F) {
+                sEndAt[s] = -1;
+            } else if (sEndAt[s] >= 0 && chr->actionFrame >= sEndAt[s] + 60) {
+                fprintf(stderr, "bt3: watchdog: action 0x%X did not finish; back to neutral\n", act->current);
+                act->request = 0xB;
+                sEndAt[s] = -1;
+            }
+        }
     }
     BtlMember_TestFull(chr);
 #endif
