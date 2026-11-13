@@ -228,6 +228,15 @@ int __wrap_Progress_Main(int arg) {
         extern void BattleSetup_SetMember(int sideNo, int idx, int chara, int costume, int variant, int cpuLevel, float health, void *items);
         extern void BattleSetup_Finish(void);
         extern int CpuLevel_FromSetting(int setting);
+        extern void FirstRun_Main(void);
+        extern void Snd_LoadBankFile(int slot, int file);
+        /* what the menus' Progress_Main does first (src/menu/menu_a_b.c): the first run loads the third archive
+           partition (without it the battle asks for its files for ever), then the sound bank */
+        if (gProgress->flags & 0x40) { /* MPROG_FIRST_RUN */
+            FirstRun_Main();
+            gProgress->flags &= ~0x40;
+        }
+        Snd_LoadBankFile(2, 0x14C);
         Battle_ClearWork();
         BattleSetup_SetRule(0, 0, 8, 5, 4, 1, 0);
         BattleSetup_SetSide(0, 0, 0, 1, 1, 1, 0, NULL);
