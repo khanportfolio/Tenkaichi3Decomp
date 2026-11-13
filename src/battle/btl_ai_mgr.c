@@ -95,6 +95,9 @@ static inline s32 BtlAiMove_Mod(s32 a, s32 b) {
 extern void BtlAiSense_Update(BtlAiWork *s);
 
 extern BtlAi *gBtlAi;
+#ifdef PORT
+extern int Port_TestFull(void); /* plat_charas.c: BT3_TEST_FULL */
+#endif
 
 /* Frees what the block owns, rebinds the shared AI data and resets both sides from their fighters. */
 void BtlAiMgr_Reset(void) {
@@ -270,6 +273,15 @@ void BtlAiMgr_Update(void) {
         BtlAiWork *s = &gBtlAi->work[i];
 
         if (BtlCharApi_IsInputInjected(i) && s->param != NULL) {
+#ifdef PORT
+            /* BT3_TEST_FULL (testing only): the computer opponent on side 1 stands still, so player 1's
+               special moves are tried without being knocked down first */
+            if (i == 1 && Port_TestFull()) {
+                BtlAiPad_Clear(&s->out, 0);
+                BtlAi_SendInput(s);
+                continue;
+            }
+#endif
             BtlAiSense_Update(s);
             AiThink_Think(s);
             BtlAi_RunSeq(s);
