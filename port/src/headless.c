@@ -126,7 +126,7 @@ int __wrap_Progress_Main(int arg) {
     port_stage_replace_init();
     path = getenv("BT3_REPLAY");
 
-    if (path == NULL && getenv("BT3_DEMO") == NULL) {
+    if (path == NULL && getenv("BT3_DEMO") == NULL && getenv("BT3_TEST_DUEL") == NULL) {
         {
             int r;
             /* An online session (gs/net.c) goes straight to the versus mode's character select, with the game's
@@ -217,6 +217,25 @@ int __wrap_Progress_Main(int arg) {
             exit(2);
         }
         printf("bt3: replay %s\n", path);
+    } else if (getenv("BT3_TEST_DUEL") != NULL) {
+        /* BT3_TEST_DUEL=1 (testing): no title, menus or character select. One duel, player 1 (pad 0) against the
+           CPU, as the versus menu's "1P vs COM" sets it up (src/menu/menu_c_e.c); the fighters come from
+           BT3_TEST_CHARA=<p1>,<p2> and the stage from BT3_TEST_STAGE (default: the first stage). The game ends
+           after the battle, like a demo battle. */
+        extern void Battle_ClearWork(void);
+        extern void BattleSetup_SetRule(int screenMode, int mode, int bgm, int timeLimit, int announcer, int stage, int unk10);
+        extern void BattleSetup_SetSide(int sideNo, int control, int pad, int memberCount, int unk1FC, int unk200, int lead, void *bits);
+        extern void BattleSetup_SetMember(int sideNo, int idx, int chara, int costume, int variant, int cpuLevel, float health, void *items);
+        extern void BattleSetup_Finish(void);
+        extern int CpuLevel_FromSetting(int setting);
+        Battle_ClearWork();
+        BattleSetup_SetRule(0, 0, 8, 5, 4, 1, 0);
+        BattleSetup_SetSide(0, 0, 0, 1, 1, 1, 0, NULL);
+        BattleSetup_SetSide(1, 2, 1, 1, 1, 1, 0, NULL);
+        BattleSetup_SetMember(0, 0, 0, 0, 0, CpuLevel_FromSetting(2), 100.0f, NULL);
+        BattleSetup_SetMember(1, 0, 13, 0, 0, CpuLevel_FromSetting(2), 100.0f, NULL);
+        BattleSetup_Finish();
+        printf("bt3: test duel\n");
     } else {
         Demo_SetupBattle();
         printf("bt3: attract-demo battle\n");

@@ -150,6 +150,8 @@ extern BtlActRoster *gBtlChars;
 extern BtlActHandler gBtlActHandlers[BTLACT_COUNT];
 #ifdef PORT
 extern int Port_ActionWatchdog(int side, int action, int frames); /* plat_charas.c */
+extern void Port_TestAction(int side, int from, int to, int frames); /* plat_charas.c: BT3_TEST_FULL's log */
+extern void BtlMember_TestFull(BtlActChr *chr); /* btl_char_member.c: BT3_TEST_FULL's full gauges */
 #endif
 
 /* Requests the action to switch to at the next dispatch (-1 is ignored). */
@@ -1177,8 +1179,12 @@ void BtlAct_Update(BtlActChr *chr) {
     if (act->request == -1 && Port_ActionWatchdog(chr->side, act->current, chr->actionFrame)) {
         act->request = 0xB; /* a technique that never ends (an added fighter's animations): back to neutral */
     }
+    BtlMember_TestFull(chr);
 #endif
     if (act->request != -1) {
+#ifdef PORT
+        Port_TestAction(chr->side, act->current, act->request, chr->actionFrame);
+#endif
         if (tbl[act->current] != NULL) {
             tbl[act->current](chr, BTLACT_PHASE_LEAVE);
         }

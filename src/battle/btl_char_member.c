@@ -667,6 +667,29 @@ void BtlMember_SetMaxPower(BtlMemberChr *chr, s32 value) {
     g->maxPower = BtlUtil_Clamp(value, 0, 30000);
 }
 
+#ifdef PORT
+/* BT3_TEST_FULL=1 (testing only, never in normal play): side 0's ki, blast stock and powered-up mode stay full, so
+   every special and ultimate can be fired at once and again (BtlCtrl_SetMaxPower's way: ki, timer, held flag 6).
+   Called for every fighter each frame from BtlAct_Update. */
+extern int Port_TestFull(void); /* plat_charas.c */
+extern void BtlChar_SetHeldFlag(BtlMemberChr *chr, s32 bit);
+void BtlMember_TestFull(BtlMemberChr *chr) {
+    BtlMemberGauge *g;
+
+    if (chr->side != 0 || !Port_TestFull()) {
+        return;
+    }
+    g = BtlMember_GetActiveGauge(chr);
+    if (g->health <= 0) {
+        return;
+    }
+    g->ki = g->kiMax;
+    g->blast = g->blastMax;
+    g->maxPower = 30000;
+    BtlChar_SetHeldFlag(chr, 6);
+}
+#endif
+
 /* Health of the active member as a fraction of its maximum. */
 f32 BtlMember_GetHealthRatio(BtlMemberChr *chr) {
     BtlMemberGauge *g = BtlMember_GetActiveGauge(chr);

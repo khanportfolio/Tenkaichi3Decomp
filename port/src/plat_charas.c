@@ -1638,6 +1638,27 @@ int Port_ActionWatchdog(int side, int action, int frames) {
     return 1;
 }
 
+/* BT3_TEST_FULL=1 (testing only): side 0's ki, blast stock and powered-up mode stay full (BtlMember_TestFull),
+   and every change of side 0's action that leaves or enters a technique (0x105..0x13B), or that ends an action of
+   10 s or more, is written to the log ("bt3: test: action ..."), so a move that hangs shows with its length. */
+int Port_TestFull(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("BT3_TEST_FULL");
+        on = e != NULL && e[0] != '\0' && e[0] != '0' && !Port_NetSession();
+    }
+    return on;
+}
+
+void Port_TestAction(int side, int from, int to, int frames) {
+    if (side != 0 || !Port_TestFull()) {
+        return;
+    }
+    if ((from >= 0x105 && from <= 0x13B) || (to >= 0x105 && to <= 0x13B) || frames >= 300) {
+        fprintf(stderr, "bt3: test: action 0x%X -> 0x%X after %d frames\n", from, to, frames);
+    }
+}
+
 const char *Port_CharaName(int index) {
     PortCharas_Init();
     return index >= 0 && index < live() ? sChara[index].name : "";
