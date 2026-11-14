@@ -1570,9 +1570,8 @@ int Port_CharaDamage(int chara, int damage) {
     return (int)((long long)damage * c->damage / 100);
 }
 
-/* Each heavy hit takes 55% of the maximum health, so a second one ends the fight. The hits of one rush or one
-   many-hit blast count once: inside OMNI_GAP_MS of a heavy hit the same fighter only takes a tenth. *exact: leave
-   the amount as it is (no defense, no combo scaling). */
+/* An omni fighter's hit (any punch, blast or special) takes all of the other fighter's health at once; between two
+   omni fighters the damage is the normal one. *exact: leave the amount as it is (no defense, no combo scaling). */
 #define OMNI_GAP_MS 700
 
 int Port_OmniDamage(int attacker, int defender, int damage, int healthMax, int *exact) {
@@ -1584,12 +1583,16 @@ int Port_OmniDamage(int attacker, int defender, int damage, int healthMax, int *
     if (!Port_CharaOmni(attacker)) {
         return Port_CharaDamage(attacker, damage);
     }
-    if (Port_CharaOmni(defender) || (*last != 0 && (now - *last) * 1000 / CLOCKS_PER_SEC < OMNI_GAP_MS)) {
-        return damage > 10 ? damage / 10 : damage;
+    /* 15 Nov 2026 (the user, again): any single punch, blast or special of Zeno ends the other fighter at once;
+       Zeno against Zeno is a normal fight, normal damage both ways (the 55% heavy hits and the tenth between two
+       omni fighters were not what was asked) */
+    if (Port_CharaOmni(defender)) {
+        return Port_CharaDamage(attacker, damage);
     }
-    *last = now;
+    (void)now;
+    (void)last;
     *exact = 1;
-    return healthMax / 100 * 55 + 10;
+    return healthMax + 10;
 }
 
 /* Whether the fighter cowers (the lose pose) before an omni fighter at the start of the fight. An added fighter with
