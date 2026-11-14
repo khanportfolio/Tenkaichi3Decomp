@@ -335,6 +335,10 @@ s32 StgModel_DrawDebris(s32 drawn, u8 *vis) {
  * (group 6). On stage 8 the debris is drawn before the blended groups; on stage 5 group 3 is skipped.
  * Not while a stage load job runs (flag 0x2000) or while the stage is not ready.
  */
+#ifdef PORT
+static u32 sPortTexAnimTick; /* StgModel_Draw calls, for the slowed texture animations of added maps */
+#endif
+
 void StgModel_Draw(void *view) {
     u8 *vis;
     s32 prog = -1;
@@ -387,6 +391,9 @@ void StgModel_Draw(void *view) {
 
     StgModel_SetTestOpaque();
 
+#ifdef PORT
+    sPortTexAnimTick++;
+#endif
     if (mdl->grp[STGM_GRP_MAIN].count != 0) {
         mtx = ((StgMView *)view)->mtx100;
         Vu1Pkt_LoadProg4(mtx);
@@ -401,7 +408,15 @@ void StgModel_Draw(void *view) {
                 if (chain == 0) {
                     anim = mats[i].anim;
                     if (anim != NULL) {
+#ifdef PORT
+                        /* Added maps (tools/maps/map_write.py): bit 8 animates a material too (the disc's never set
+                           it, and its loader leaves bit 4 alone, so a file cannot ask for bit 4 itself); bits 9..11
+                           hold one step every n + 1 drawn frames (slower flowing water). */
+                        if (((anim->flags & 4) || ((anim->flags & 0x100) && (sPortTexAnimTick % (((anim->flags >> 9) & 7) + 1)) == 0)) &&
+                            !(Battle_GetWork()->flags & 0x100)) {
+#else
                         if ((anim->flags & 4) && !(Battle_GetWork()->flags & 0x100)) {
+#endif
                             /* Step the texture animation: looping, or back and forth (bit 15 = going back). */
                             frames = anim->frames;
                             for (k = 0; k < anim->count; k++) {
