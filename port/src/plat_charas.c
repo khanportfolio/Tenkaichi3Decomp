@@ -1599,13 +1599,16 @@ int Port_OmniFears(int chara, int other) {
 
 /* The scripted hit sequence of a rush technique (0x12D..0x12F) is shorter: an added fighter's animation that never
    reports the end of a step replays the hits over and over (Goku Ultra Instinct Sign's rush ran to 41 hits). */
-#define WATCHDOG_RUSH_FRAMES 300
+/* 14 Nov 2026: 300 cut Goku Ultra Instinct's long Meteor Smash combos (28 hits) mid-way: 450, as for other actions. */
+#define WATCHDOG_RUSH_FRAMES 450
 
 /* A rush whose hits are over but whose action never ends: once the scripted sequence has landed hits and then none
    for WATCHDOG_RUSH_QUIET frames (2.5 s), it is over. Seen with Goku Ultra Instinct's BT4 Meteor Smash: 26 hits, then
    both fighters stood with the clock stopped until the 10 s limit. The start of a rush (its cinematic, before the
    first hit) is never cut by this: it needs a hit first. Hits are counted per side from BtlMember_Damage. */
-#define WATCHDOG_RUSH_QUIET 75
+/* 14 Nov 2026: 75 (2.5 s) ended moves that pause between a rush and their finisher: Gogeta Blue's (Super Gogeta's)
+   L2+Down+Triangle landed 7 hits, raised its ball overhead and was cut before the throw. 180 frames (6 s). */
+#define WATCHDOG_RUSH_QUIET 180
 static int sRushHits[2], sRushQuiet[2];
 
 void Port_ActionHit(int attackerSide) {
