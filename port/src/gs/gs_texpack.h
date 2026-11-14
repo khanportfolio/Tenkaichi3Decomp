@@ -12,6 +12,8 @@ typedef struct TexPackImage {
     int levels;
     const uint8_t *data[TEXPACK_MAX_LEVELS];  /* each level's data, inside `file` */
     uint32_t bytes[TEXPACK_MAX_LEVELS];
+    uint32_t frames;    /* an animated replacement (.anim): its frames, each bytes[0] long after data[0]; 0 or 1: still */
+    uint32_t fpsMilli;  /* and its frames per 1000 seconds */
 } TexPackImage;
 
 void TexPack_Init(void);  /* looks through the folder once */

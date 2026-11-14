@@ -183,6 +183,8 @@ typedef struct Tex {
     uint32_t amax;           /* and the largest alpha byte of the original */
     int pack;                /* a texture pack's replacement still being read (gs_texpack.c), or -1 */
     uint32_t packAlpha;      /* and the amax it will have */
+    int anim;                /* an animated replacement's pack id (anim_step), or -1 */
+    uint32_t animFrame;      /* and the frame it shows */
 } Tex;
 static Tex sTex[MAX_TEX];
 static uint16_t sTexBucket[TEX_BUCKETS]; /* index + 1 of a cache entry, 0 = empty (open addressing) */
@@ -422,33 +424,77 @@ static GsTex pack_texture(const TexPackImage *pack) {
     return tex;
 }
 
+/* Textures replaced in a cache entry: the frames before may still draw them (Smooth motion draws the last one again
+   while the game makes the next), so they are released a few frames later. */
+static struct { GsTex tex; unsigned frame; } sOld[512];
+static unsigned sOldHead, sOldTail;
+
+static void old_sweep(void) {
+    while (sOldTail != sOldHead && sOld[sOldTail & 511].frame + 4 <= gGsFrame) {
+        sBackend->texDestroy(sOld[sOldTail++ & 511].tex);
+    }
+}
+
+static void old_retire(GsTex tex) {
+    sOld[sOldHead & 511].tex = tex;
+    sOld[sOldHead++ & 511].frame = gGsFrame;
+}
+
+/* An animated replacement (.anim, gs_texpack.c): the frame the clock is at, made into a texture of its own when it
+   changes (15 Nov 2026: the user's video backgrounds of the menus). Looping; the time is the real one. */
+static void anim_step(Tex *c) {
+    TexPackImage pack;
+    GsTex tex;
+    uint32_t f;
+    void *buf;
+
+    old_sweep();
+    if (TexPack_Get(c->anim, &pack) <= 0 || pack.frames < 2) {
+        return;
+    }
+    f = (uint32_t)((gpu_now() / 1000000u) * (uint64_t)pack.fpsMilli / 1000000u % pack.frames);
+    if (f == c->animFrame || sOldHead - sOldTail >= 512 || sBackend->texSlotsLeft() < 1) {
+        return;
+    }
+    tex = sBackend->texCreate(pack.w, pack.h, pack.format & 3, 1);
+    if (tex == 0) {
+        return;
+    }
+    buf = malloc(pack.bytes[0]);
+    if (buf == NULL) {
+        sBackend->texDestroy(tex);
+        return;
+    }
+    memcpy(buf, pack.data[0] + (size_t)f * pack.bytes[0], pack.bytes[0]);
+    sBackend->texUpload(tex, 0, pack.w, pack.h, pack.format & 3, buf, pack.bytes[0]);
+    old_retire(c->tex);
+    c->tex = tex;
+    c->animFrame = f;
+}
+
 /* A texture made from the original while its replacement was still being read: once the file is in, it is made
-   again from that, at its first use in a frame. The one it replaces may still be in the lists of the frames before
-   (Smooth motion draws the last one again while the game makes the next): it is released a few frames later. */
+   again from that, at its first use in a frame. */
 static void pack_arrived(Tex *c) {
-    static struct { GsTex tex; unsigned frame; } old[256];
-    static unsigned oldHead, oldTail;
     TexPackImage pack;
     GsTex tex;
     int got;
 
-    while (oldTail != oldHead && old[oldTail & 255].frame + 4 <= gGsFrame) {
-        sBackend->texDestroy(old[oldTail++ & 255].tex);
-    }
+    old_sweep();
     got = TexPack_Get(c->pack, &pack);
     if (got < 0 || !sTexPackOn) {
         c->pack = -1;
         return;
     }
-    if (got == 0 || oldHead - oldTail == 256 || sBackend->texSlotsLeft() < pack.levels) {
+    if (got == 0 || sOldHead - sOldTail >= 512 || sBackend->texSlotsLeft() < pack.levels) {
         return; /* (not yet: asked again at the next frame's first use) */
     }
     tex = pack_texture(&pack);
     if (tex == 0) {
         return;
     }
-    old[oldHead & 255].tex = c->tex;
-    old[oldHead++ & 255].frame = gGsFrame;
+    old_retire(c->tex);
+    c->anim = pack.frames > 1 ? c->pack : -1;
+    c->animFrame = 0;
     c->tex = tex;
     c->replaced = 1;
     c->rw = pack.w;
@@ -469,7 +515,7 @@ static GsTex texture_get(int ctx) {
     uint64_t tex_t0;
     TexPackImage pack;
     uint32_t packMaxAlpha = 255, rw = tw, rh = th;
-    int replaced = 0, menuText = 0, sharedText = 0, battleText = 0, packWait = -1;
+    int replaced = 0, menuText = 0, sharedText = 0, battleText = 0, packWait = -1, animId = -1;
 
     if (tw > 1024) { tw = 1024; }
     if (th > 1024) { th = 1024; }
@@ -493,6 +539,9 @@ static GsTex texture_get(int ctx) {
         if (sLast->pack >= 0 && sLast->last != gGsFrame) {
             pack_arrived(sLast);
         }
+        if (sLast->anim >= 0 && sLast->last != gGsFrame) {
+            anim_step(sLast);
+        }
         sLast->last = gGsFrame;
         return sLast->tex; /* the common case: the same texture as the previous primitive */
     }
@@ -503,6 +552,9 @@ static GsTex texture_get(int ctx) {
             if (c->tex0 == t0 && c->texa == texa && c->gen == gen) {
                 if (c->pack >= 0 && c->last != gGsFrame) {
                     pack_arrived(c);
+                }
+                if (c->anim >= 0 && c->last != gGsFrame) {
+                    anim_step(c);
                 }
                 c->last = gGsFrame;
                 sLast = c;
@@ -548,6 +600,7 @@ static GsTex texture_get(int ctx) {
         int got = id >= 0 ? TexPack_Get(id, &pack) : -1;
         if (got > 0 && sBackend->texSlotsLeft() >= pack.levels) {
             replaced = 1;
+            animId = pack.frames > 1 ? id : -1;
             gGpuTexReplaced++;
             rw = pack.w;
             rh = pack.h;
@@ -648,6 +701,8 @@ static GsTex texture_get(int ctx) {
     t->amax = replaced ? packMaxAlpha : 255u;
     t->pack = packWait;
     t->packAlpha = packMaxAlpha;
+    t->anim = animId;
+    t->animFrame = 0;
     return t->tex;
 }
 

@@ -74,18 +74,22 @@ static int find(uint64_t tex, uint64_t clut, uint32_t bits, int pal) {
     return -1;
 }
 
-/* "1dd4c76113969303-56e3d4469d2ad392-00005e54.dds" */
+/* "1dd4c76113969303-56e3d4469d2ad392-00005e54.dds" (or .png, or .anim: an animated replacement, load_anim) */
 static void add(const char *dir, const char *name) {
-    size_t n = strlen(name);
+    size_t n = strlen(name), ext;
     char part[3][20];
     int parts = 0, len = 0;
     size_t i;
     Entry e;
 
-    if (n < 8 || (SDL_strcasecmp(name + n - 4, ".dds") != 0 && SDL_strcasecmp(name + n - 4, ".png") != 0)) {
+    if (n >= 9 && SDL_strcasecmp(name + n - 5, ".anim") == 0) {
+        ext = 5;
+    } else if (n >= 8 && (SDL_strcasecmp(name + n - 4, ".dds") == 0 || SDL_strcasecmp(name + n - 4, ".png") == 0)) {
+        ext = 4;
+    } else {
         return;
     }
-    for (i = 0; i < n - 4; i++) {
+    for (i = 0; i < n - ext; i++) {
         char c = name[i];
         if (c == '-') {
             if (len == 0 || parts == 2) {
@@ -321,6 +325,37 @@ static int load_png(const char *path, TexPackImage *img) {
     return 1;
 }
 
+/* An animated replacement (made from a video by Super-Characters/tools/video_texture.py): "BT3ANIM1", then u32 width,
+   height, format (0 RGBA, 1 DXT1, 3 DXT5), frames, frames per 1000 seconds, bytes per frame; then the frames one
+   after the other. The renderer shows the frame the clock is at (gs_draw.c anim_step), looping. */
+static int load_anim(const char *path, TexPackImage *img) {
+    size_t size = 0;
+    uint8_t *f = SDL_LoadFile(path, &size);
+    uint32_t w, h, fmt, frames, fps, fb;
+
+    if (f == NULL || size < 32 || memcmp(f, "BT3ANIM1", 8) != 0) {
+        SDL_free(f);
+        return 0;
+    }
+    memcpy(&w, f + 8, 4); memcpy(&h, f + 12, 4); memcpy(&fmt, f + 16, 4);
+    memcpy(&frames, f + 20, 4); memcpy(&fps, f + 24, 4); memcpy(&fb, f + 28, 4);
+    if (w == 0 || h == 0 || w > 4096 || h > 4096 || frames == 0 || fps == 0 || (fmt != 0 && fmt != 1 && fmt != 3) ||
+        fb != (fmt ? ((w + 3) / 4) * ((h + 3) / 4) * (fmt == 1 ? 8u : 16u) : w * h * 4) || 32 + (size_t)fb * frames > size) {
+        SDL_free(f);
+        return 0;
+    }
+    img->file = f;
+    img->w = w;
+    img->h = h;
+    img->format = (int)fmt;
+    img->levels = 1;
+    img->data[0] = f + 32;
+    img->bytes[0] = fb;
+    img->frames = frames;
+    img->fpsMilli = fps;
+    return 1;
+}
+
 static int load(const char *path, TexPackImage *img) {
     size_t size = 0;
     uint8_t *f;
@@ -329,6 +364,9 @@ static int load(const char *path, TexPackImage *img) {
     memset(img, 0, sizeof(*img));
     if (strlen(path) > 4 && SDL_strcasecmp(path + strlen(path) - 4, ".png") == 0) {
         return load_png(path, img);
+    }
+    if (strlen(path) > 5 && SDL_strcasecmp(path + strlen(path) - 5, ".anim") == 0) {
+        return load_anim(path, img);
     }
     f = SDL_LoadFile(path, &size);
     if (f == NULL || size < 128 || memcmp(f, "DDS ", 4) != 0) {
@@ -403,6 +441,9 @@ static size_t image_bytes(const TexPackImage *img) {
     int level;
     for (level = 0; level < img->levels; level++) {
         n += img->bytes[level];
+    }
+    if (img->frames > 1) {
+        n = (size_t)img->bytes[0] * img->frames;
     }
     return n;
 }
