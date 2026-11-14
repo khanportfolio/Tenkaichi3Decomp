@@ -337,6 +337,7 @@ s32 StgModel_DrawDebris(s32 drawn, u8 *vis) {
  */
 #ifdef PORT
 static u32 sPortTexAnimTick; /* StgModel_Draw calls, for the slowed texture animations of added maps */
+extern void *gPortStageBase;  /* stg_a.c: the base of the stage file's offsets */
 #endif
 
 void StgModel_Draw(void *view) {
@@ -411,7 +412,14 @@ void StgModel_Draw(void *view) {
 #ifdef PORT
                         /* Added maps (tools/maps/map_write.py): bit 8 animates a material too (the disc's never set
                            it, and its loader leaves bit 4 alone, so a file cannot ask for bit 4 itself); bits 9..11
-                           hold one step every n + 1 drawn frames (slower flowing water). */
+                           hold one step every n + 1 drawn frames (slower flowing water). The loader relocates the
+                           material's anim pointer but never the frame list inside it (the disc's animations never
+                           ran, so it did not matter): it is a word offset from the stage model, made a pointer here
+                           once (bit 15 marks it done). */
+                        if ((anim->flags & 0x8100) == 0x100) {
+                            anim->frames = (s32 *)((s32)gPortStageBase + (s32)anim->frames * 4);
+                            anim->flags |= 0x8000;
+                        }
                         if (((anim->flags & 4) || ((anim->flags & 0x100) && (sPortTexAnimTick % (((anim->flags >> 9) & 7) + 1)) == 0)) &&
                             !(Battle_GetWork()->flags & 0x100)) {
 #else

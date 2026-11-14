@@ -181,8 +181,15 @@ void BtlStage_Reset(void) {
     StgAmb_Start();
 }
 
+#ifdef PORT
+void *gPortStageBase; /* what the stage file's offsets count from (stgm_a.c: frame lists of added maps) */
+#endif
+
 /* Sets the stage object, builds its model and rigid bodies, then resets it. */
 void BtlStage_Init(BtlStage *stage, void *arg) {
+#ifdef PORT
+    gPortStageBase = arg;
+#endif
     gBtlStage = stage;
     BtlStage_Relocate(arg);
     ColMesh_SetBase(arg);
