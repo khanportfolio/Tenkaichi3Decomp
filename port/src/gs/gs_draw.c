@@ -185,6 +185,7 @@ typedef struct Tex {
     uint32_t packAlpha;      /* and the amax it will have */
     int anim;                /* an animated replacement's pack id (anim_step), or -1 */
     uint32_t animFrame;      /* and the frame it shows */
+    int backdrop;            /* its replacement is a menu's backdrop video (gs_texpack.c backdrop; GsGpu_Draw) */
 } Tex;
 static Tex sTex[MAX_TEX];
 static uint16_t sTexBucket[TEX_BUCKETS]; /* index + 1 of a cache entry, 0 = empty (open addressing) */
@@ -515,7 +516,7 @@ static GsTex texture_get(int ctx) {
     uint64_t tex_t0;
     TexPackImage pack;
     uint32_t packMaxAlpha = 255, rw = tw, rh = th;
-    int replaced = 0, menuText = 0, sharedText = 0, battleText = 0, packWait = -1, animId = -1;
+    int replaced = 0, menuText = 0, sharedText = 0, battleText = 0, packWait = -1, animId = -1, isBackdrop = 0;
 
     if (tw > 1024) { tw = 1024; }
     if (th > 1024) { th = 1024; }
@@ -598,6 +599,7 @@ static GsTex texture_get(int ctx) {
     if (sTexPackOn && TexPack_Count() != 0) {
         int id = TexPack_Lookup(tbp, tbw, psm, tw, th, (uint32_t)((t0 >> 34) & 1), cbp, cpsm, &packMaxAlpha);
         int got = id >= 0 ? TexPack_Get(id, &pack) : -1;
+        isBackdrop = TexPack_IsBackdrop(id);
         if (got > 0 && sBackend->texSlotsLeft() >= pack.levels) {
             replaced = 1;
             animId = pack.frames > 1 ? id : -1;
@@ -703,6 +705,7 @@ static GsTex texture_get(int ctx) {
     t->packAlpha = packMaxAlpha;
     t->anim = animId;
     t->animFrame = 0;
+    t->backdrop = isBackdrop;
     return t->tex;
 }
 
@@ -1383,6 +1386,42 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
         }
     }
     date_snapshot(&d);
+    if (sLast != NULL && !d.tex_is_target && sLast->tex == d.tex && sLast->backdrop && sLast->replaced == 1 &&
+        gsTargets[d.target].fbp == (uint32_t)gGsMainFbp && !lowres_now(d.target)) {
+        /* A menu's backdrop video (15 Nov 2026, gs_texpack.c backdrop): the first of the screen's background layers
+           in this frame becomes the video over the whole picture (the scissor's rectangle, which the game sets to
+           the page), the others are left out. What the game draws after them (the menu, its text, the frames)
+           comes on top as before. */
+        static unsigned sBackdropFrame;
+        float bx0, by0, bx1, by1;
+        if (sBackdropFrame == gGsFrame + 1) {
+            return;
+        }
+        sBackdropFrame = gGsFrame + 1;
+        bx0 = (float)d.scissor[0] / (float)SCALE;
+        by0 = (float)d.scissor[1] / (float)SCALE;
+        bx1 = (float)(d.scissor[0] + d.scissor[2]) / (float)SCALE;
+        by1 = (float)(d.scissor[1] + d.scissor[3]) / (float)SCALE;
+        if (d.scissor[2] <= 0 || d.scissor[3] <= 0) {
+            bx0 = 0.0f; by0 = 0.0f; bx1 = 512.0f; by1 = 448.0f;
+        }
+        d.sampler |= 1; /* filtered */
+        d.misc[3] = -(float)SCALE;        /* sampled per output pixel, inside the whole video */
+        d.rect[0] = 0.0f; d.rect[1] = 0.0f; d.rect[2] = 1.0f; d.rect[3] = 1.0f;
+        d.orig[0] = (float)sLast->rw; d.orig[1] = (float)sLast->rh; d.orig[3] = 1.0f;
+        d.first = gsVertCount;
+        put(&v[0], bx0, by0, 0.0f, 0.0f, 1.0f, 128, 128, 128, 128, zmax);
+        put(&v[0], bx1, by0, 1.0f, 0.0f, 1.0f, 128, 128, 128, 128, zmax);
+        put(&v[0], bx0, by1, 0.0f, 1.0f, 1.0f, 128, 128, 128, 128, zmax);
+        put(&v[0], bx1, by0, 1.0f, 0.0f, 1.0f, 128, 128, 128, 128, zmax);
+        put(&v[0], bx1, by1, 1.0f, 1.0f, 1.0f, 128, 128, 128, 128, zmax);
+        put(&v[0], bx0, by1, 0.0f, 1.0f, 1.0f, 128, 128, 128, 128, zmax);
+        d.count = 6;
+        gsTargets[d.target].draws++;
+        gsTargets[d.target].gen = gGsPageGen[gsTargets[d.target].fbp & 511];
+        gsDraws[gsDrawCount++] = d;
+        return;
+    }
     for (i = 0; i < n; i++) {
         if (fst) {
             s[i] = (float)v[i].u / 16.0f / tw * us;

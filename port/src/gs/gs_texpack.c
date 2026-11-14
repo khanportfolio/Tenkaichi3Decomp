@@ -41,6 +41,8 @@ typedef struct Entry {
     unsigned used;    /* when TexPack_Get last asked for it */
     size_t held;      /* the bytes img holds */
     TexPackImage img;
+    int alias;        /* a backdrop's other texture: the entry whose file it shares (-1: its own) */
+    int backdrop;     /* a menu's backdrop video (backdrop.txt) */
 } Entry;
 
 static Entry *sEntries;
@@ -114,6 +116,8 @@ static void add(const char *dir, const char *name) {
     e.state = 0;
     e.used = 0;
     e.held = 0;
+    e.alias = -1;
+    e.backdrop = 0;
     memset(&e.img, 0, sizeof(e.img));
     e.path = malloc(strlen(dir) + n + 1);
     strcpy(e.path, dir);
@@ -123,6 +127,57 @@ static void add(const char *dir, const char *name) {
         sEntries = realloc(sEntries, sCap * sizeof(Entry));
     }
     sEntries[sCount++] = e;
+}
+
+/* A menu's backdrop video (15 Nov 2026: the user's videos behind the Main Menu and the Versus Menu, whose own
+   backgrounds are layers that scroll): a folder of the pack with backdrop.txt in it,
+       video main.anim
+       cb83b019444648a7-f686aadafa5dc2b1-000061d3
+       ...
+   The listed textures are the screen's background layers. Each gets the video as its replacement (one file, read
+   once: the others are aliases of the first); the renderer draws it once over the whole screen where the first of
+   them comes in a frame and leaves the rest out (gs_draw.c). */
+static void backdrop(const char *dir, const char *name) {
+    char path[1024], line[256], video[1024] = "";
+    FILE *f;
+    int first = -1, pass;
+
+    snprintf(path, sizeof(path), "%s%s", dir, name);
+    for (pass = 0; pass < 2; pass++) {
+        f = fopen(path, "r");
+        if (f == NULL) {
+            return;
+        }
+        while (fgets(line, sizeof(line), f) != NULL) {
+            char *s = line, *e;
+            while (*s == ' ' || *s == '\t') { s++; }
+            for (e = s + strlen(s); e > s && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t'); ) { *--e = '\0'; }
+            if (*s == '\0' || *s == '#') {
+                continue;
+            }
+            if (strncmp(s, "video ", 6) == 0) {
+                if (pass == 0) { snprintf(video, sizeof(video), "%s%s", dir, s + 6); }
+                continue;
+            }
+            if (pass == 1 && video[0] != '\0') {
+                char file[300];
+                uint32_t before = sCount;
+                snprintf(file, sizeof(file), "%s.anim", s);
+                add(dir, file);
+                if (sCount == before + 1) {
+                    Entry *en = &sEntries[sCount - 1];
+                    free(en->path);
+                    en->path = malloc(strlen(video) + 1);
+                    strcpy(en->path, video);
+                    en->backdrop = 1;
+                    en->alias = first;
+                    if (first < 0) { first = (int)(sCount - 1); }
+                }
+            }
+        }
+        fclose(f);
+    }
+    fprintf(stderr, "bt3: texture pack: backdrop %s (%s)\n", path, video[0] ? video : "no video line");
 }
 
 static SDL_EnumerationResult SDLCALL walk(void *userdata, const char *dir, const char *name) {
@@ -135,6 +190,8 @@ static SDL_EnumerationResult SDLCALL walk(void *userdata, const char *dir, const
     if (SDL_GetPathInfo(path, &info) && info.type == SDL_PATHTYPE_DIRECTORY) {
         strcat(path, "/");
         SDL_EnumerateDirectory(path, walk, NULL);
+    } else if (SDL_strcasecmp(name, "backdrop.txt") == 0) {
+        backdrop(dir, name);
     } else {
         add(dir, name);
     }
@@ -507,12 +564,19 @@ static void trim(uint32_t keep) {
     }
 }
 
+int TexPack_IsBackdrop(int id) {
+    return id >= 0 && (uint32_t)id < sCount && sEntries[id].backdrop;
+}
+
 int TexPack_Get(int id, TexPackImage *img) {
     Entry *e;
     int r;
 
     if (id < 0 || (uint32_t)id >= sCount) {
         return -1;
+    }
+    if (sEntries[id].alias >= 0) {
+        id = sEntries[id].alias; /* a backdrop's other textures share the first one's file */
     }
     if (sSync < 0) {
         const char *mb = getenv("BT3_PACK_MB");

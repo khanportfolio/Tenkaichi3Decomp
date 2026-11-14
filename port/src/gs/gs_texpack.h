@@ -28,5 +28,8 @@ const char *TexPack_Path(int id);
 /* Replacement `id`'s pixels: 1 and *img (kept by the pack: valid until the next call), 0 while the file is still
    being read (in the background: ask again later), -1 if it cannot be read. */
 int TexPack_Get(int id, TexPackImage *img);
+/* 1 when replacement `id` is a menu's backdrop video (a folder with backdrop.txt): the renderer draws the video once
+   over the whole screen at the first of these textures in a frame and leaves the others of the frame out. */
+int TexPack_IsBackdrop(int id);
 
 #endif
