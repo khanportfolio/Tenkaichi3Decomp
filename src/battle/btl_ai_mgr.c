@@ -97,6 +97,7 @@ extern void BtlAiSense_Update(BtlAiWork *s);
 extern BtlAi *gBtlAi;
 #ifdef PORT
 extern int Port_TestFull(void); /* plat_charas.c: BT3_TEST_FULL */
+extern int Port_TestStill(void); /* plat_charas.c: BT3_TEST_STILL */
 #endif
 
 /* Frees what the block owns, rebinds the shared AI data and resets both sides from their fighters. */
@@ -276,7 +277,7 @@ void BtlAiMgr_Update(void) {
 #ifdef PORT
             /* BT3_TEST_FULL (testing only): the computer opponent on side 1 stands still, so player 1's
                special moves are tried without being knocked down first */
-            if (i == 1 && Port_TestFull()) {
+            if (i == 1 && (Port_TestFull() || Port_TestStill())) {
                 BtlAiPad_Clear(&s->out, 0);
                 BtlAi_SendInput(s);
                 continue;

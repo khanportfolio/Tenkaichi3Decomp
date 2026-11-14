@@ -1,5 +1,10 @@
 #include "common.h"
 #include "battle/btl_act_c.h"
+#ifdef PORT
+#include <stdio.h>
+extern int Port_TestStill(void); /* plat_charas.c: BT3_TEST_STILL, logs the ki charge */
+static int sPortChargeFrames[2], sPortChargeLoop[2], sPortChargeKi[2];
+#endif
 
 /*
  * Fighter action handlers, third slice: 0x1EA5F8..0x1EE058 (a slice of the original handler file: its float
@@ -665,7 +670,31 @@ s32 BtlAct_ChargeHandler(Chr *chr, s32 phase) {
 
     if (phase == 0) {
         BtlAnim_Play(chr, 0x34, 0.15f);
+#ifdef PORT
+        if (Port_TestStill() && chr->side == 0) {
+            sPortChargeFrames[0] = sPortChargeLoop[0] = sPortChargeKi[0] = 0;
+            fprintf(stderr, "bt3: test: charge start\n");
+        }
+#endif
     }
+#ifdef PORT
+    if (phase == 1 && Port_TestStill() && chr->side == 0) {
+        int a = BtlAnim_GetId(chr);
+        sPortChargeFrames[0]++;
+        if (a == 0x35) {
+            if (sPortChargeLoop[0] == 0) {
+                fprintf(stderr, "bt3: test: charge loop reached after %d frames\n", sPortChargeFrames[0]);
+            }
+            sPortChargeLoop[0]++;
+            sPortChargeKi[0] += (BtlChar_TestFlag(chr, 0x11) ? BtlParam_GetRateB(chr) : BtlParam_GetRateA(chr));
+            if (sPortChargeLoop[0] == 30) {
+                fprintf(stderr, "bt3: test: charge gives %d ki in 30 frames\n", sPortChargeKi[0]);
+            }
+        } else if (a == 0x34 && sPortChargeFrames[0] == 90) {
+            fprintf(stderr, "bt3: test: charge start animation still playing after 90 frames (no ki)\n");
+        }
+    }
+#endif
     if (phase == 1) {
         switch (BtlAnim_GetId(chr)) {
             case 0x34:

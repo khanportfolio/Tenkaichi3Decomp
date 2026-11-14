@@ -1653,6 +1653,19 @@ int Port_TestFull(void) {
     return on;
 }
 
+/* BT3_TEST_STILL=1 (testing only, 14 Nov 2026): the side 1 CPU stands still as with BT3_TEST_FULL, but nothing is
+   filled, and the ki charge (action 0x37) of side 0 is logged ("bt3: test: charge ..."): whether its loop (the
+   animation 0x35 that adds the ki) is reached and how much ki one second of it gives. For checking that L2 really
+   charges every added fighter (Goku SSB showed the pose but gained nothing). */
+int Port_TestStill(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("BT3_TEST_STILL");
+        on = e != NULL && e[0] != '\0' && e[0] != '0' && !Port_NetSession();
+    }
+    return on;
+}
+
 void Port_TestAction(int side, int from, int to, int frames) {
     if (side != 0 || !Port_TestFull()) {
         return;
