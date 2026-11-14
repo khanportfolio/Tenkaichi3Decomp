@@ -142,6 +142,26 @@ s32 Progress_Main(s32 arg) {
             break;
         case 1:
 #ifdef PORT
+            { /* PC build: start_select=1 in the settings opens the game at the Duel's character select (1P vs COM,
+                 single battle) the first time the title would show, when the save has loaded (the user, 15 Nov
+                 2026: "always open the game at character selection instead of the start page"). Leaving the select
+                 goes to the Duel menu and the main menu as usual. */
+                extern int Port_Setting(const char *name, int def);
+                extern int Port_NetFixedStart(void);
+                static s32 sStartSelectDone;
+
+                if (!sStartSelectDone && (gProgress->flags & MPROG_SAVE_LOADED) && !Port_NetFixedStart() &&
+                    Port_Setting("start_select", 0)) {
+                    sStartSelectDone = 1;
+                    *(s32 *)((u8 *)gProgress + 0x620) = 0; /* DuelProgress.versus: 1P vs COM */
+                    *(s32 *)((u8 *)gProgress + 0x624) = 0; /* battleType: single */
+                    *(s32 *)((u8 *)gProgress + 0x630) = 0; /* dpLimit */
+                    MENU_ARC_FREE(gMenuArc1);
+                    gProgress->mode = 39;
+                    break;
+                }
+                sStartSelectDone = 1;
+            }
             {
                 extern s32 Movie_PlayTitle(void);
                 extern s32 gPortTitleAuto;

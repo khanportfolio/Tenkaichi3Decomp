@@ -1624,7 +1624,9 @@ int Port_OmniFears(int chara, int other) {
    first hit) is never cut by this: it needs a hit first. Hits are counted per side from BtlMember_Damage. */
 /* 14 Nov 2026: 75 (2.5 s) ended moves that pause between a rush and their finisher: Gogeta Blue's (Super Gogeta's)
    L2+Down+Triangle landed 7 hits, raised its ball overhead and was cut before the throw. 180 frames (6 s). */
-#define WATCHDOG_RUSH_QUIET 180
+/* 15 Nov 2026: 180 cut the Super Spirit Bomb (a slow ball after one hit, its push-back in between): 360 (12 s); the
+   15 s of WATCHDOG_RUSH_FRAMES still ends a rush that truly never stops. */
+#define WATCHDOG_RUSH_QUIET 360
 static int sRushHits[2], sRushQuiet[2];
 
 void Port_ActionHit(int attackerSide) {
