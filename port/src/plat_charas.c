@@ -75,6 +75,7 @@ typedef struct {
     int stat[PORT_STAT_COUNT]; /* health, ki, blast stocks: -1 not said */
     int omni;                  /* omni=1: see Port_OmniDamage */
     int damage;                /* damage=<percent> the fighter's hits do (Port_OmniDamage); 0 = not said (100) */
+    int ultBlast;              /* ultimate_blast=<stocks>: see Port_CharaUltBlast; 0 = not said */
     int pkg;                   /* its entry in sPkg, or -1 */
     short par[PAR_COUNT];      /* bytes of the parameter block from 0x98 (PAR_*): -1 not said */
     unsigned char freshSet;    /* bits 0..3: `<slot>_fresh` said (bit 4 + k of +0xAD) */
@@ -346,6 +347,8 @@ static void apply(Chara *c, const char *key, const char *value) {
         c->omni = strcmp(value, "1") == 0;
     } else if (strcmp(key, "damage") == 0) {
         c->damage = number(value, 10, 1000, &x) ? x : 0;
+    } else if (strcmp(key, "ultimate_blast") == 0) {
+        c->ultBlast = number(value, 1, 7, &x) ? x : 0;
     } else if (strcmp(key, "form") == 0) {
         put(c->label, sizeof(c->label), value);
         c->labelSet = 1;
@@ -1537,6 +1540,19 @@ int Port_CharaOmni(int chara) {
     }
     c = chara_of(chara);
     return c != NULL && c->omni;
+}
+
+/* ultimate_blast=<stocks> in a manifest, offline: the fighter's ultimate (L2 + down + triangle) needs that many
+   blast stocks (the blue gauge) and spends them, instead of the powered-up mode and ki (the user's Ultra Instinct
+   Spirit Bomb, 15 Nov 2026: "2 points in blue, then L2 down triangle"). 0: as on the disc. */
+int Port_CharaUltBlast(int chara) {
+    const Chara *c;
+    PortCharas_Init();
+    if (Port_NetSession()) {
+        return 0;
+    }
+    c = chara_of(chara);
+    return c != NULL ? c->ultBlast : 0;
 }
 
 /* damage=<percent> in a manifest, offline: the fighter's hits do that share of what they would do (10..1000;

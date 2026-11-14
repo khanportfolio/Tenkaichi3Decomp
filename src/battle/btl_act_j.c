@@ -42,6 +42,10 @@ extern BtlActJGauge *BtlMember_GetActiveGauge(BtlActJChr *chr);
 extern s32 BtlMember_CountAlive(BtlActJChr *chr);
 extern s32 BtlMember_HasKi(BtlActJChr *chr, s32 amount);
 extern s32 BtlMember_HasBlast(BtlActJChr *chr, s32 amount);
+#ifdef PORT
+extern void BtlMember_SubBlast(BtlActJChr *chr, s32 amount);
+extern int Port_CharaUltBlast(int chara); /* plat_charas.c: ultimate_blast=<stocks> */
+#endif
 extern s32 BtlMember_HasAbility(BtlActJChr *chr, s32 ability);
 
 extern void BtlAct_SetQueue(BtlActJChr *chr, u32 slot, s32 id);
@@ -536,6 +540,13 @@ s32 BtlAct_CanUseTechnique(BtlActJChr *chr, s32 slot) {
     if (!BtlChar_TestFlag(chr, 5)) {
         return 0;
     }
+#ifdef PORT
+    /* PC build: a manifest's ultimate_blast=<n> makes the ultimate need n blast stocks instead of the powered-up
+       mode and ki (spent in BtlAct_CheckTechniqueInput) */
+    if (slot == 4 && Port_CharaUltBlast(BtlMember_GetActive(chr)->chara) > 0) {
+        return BtlMember_HasBlast(chr, Port_CharaUltBlast(BtlMember_GetActive(chr)->chara) * 100000);
+    }
+#endif
     if (slot == 4 && !BtlChar_TestFlag(chr, 6)) {
         return 0;
     }
@@ -608,6 +619,11 @@ s32 BtlAct_CheckTechniqueInput(BtlActJChr *chr) {
     }
     if (slot == 4) {
         BtlAct_SetQueue(chr, n++, 0x105);
+#ifdef PORT
+        if (Port_CharaUltBlast(BtlMember_GetActive(chr)->chara) > 0) {
+            BtlMember_SubBlast(chr, Port_CharaUltBlast(BtlMember_GetActive(chr)->chara) * 100000);
+        }
+#endif
     }
     BtlAct_SetQueue(chr, n++, BtlAct_GetTechniqueAction(chr, slot));
     return n;
