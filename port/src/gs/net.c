@@ -762,7 +762,7 @@ static void voice_send(void) {
     uint8_t pkt[8 + VOICE_FRAME];
     uint32_t head[2] = {MAGIC, T_VOICE};
     int len, k;
-    if (!sConnected) {
+    if (!sConnected || !sModsShared) { /* (the user: voice only in a match with the same mods, menus and fights) */
         return;
     }
     PortVoice_Live();
@@ -827,7 +827,7 @@ static int receive(void) {
             net_send(ack, sizeof(ack), &from);
         } else if (type == T_CONFIG_ACK && sMode == 1) {
             sCfgAcked = 1;
-        } else if (type == T_VOICE && sConnected && n > 8) {
+        } else if (type == T_VOICE && sConnected && sModsShared && n > 8) {
             PortVoice_Heard(pkt + 8, n - 8);
         } else if (type == T_CHAT && sConnected && n >= 16) { /* (from the other player's address only: above) */
             uint32_t seq, len;
