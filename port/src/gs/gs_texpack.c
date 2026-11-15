@@ -43,6 +43,7 @@ typedef struct Entry {
     TexPackImage img;
     int alias;        /* a backdrop's other texture: the entry whose file it shares (-1: its own) */
     int backdrop;     /* a menu's backdrop video (backdrop.txt) */
+    char *audio;      /* and its sound (backdrop.txt "audio <file>"), or NULL */
 } Entry;
 
 static Entry *sEntries;
@@ -118,6 +119,7 @@ static void add(const char *dir, const char *name) {
     e.held = 0;
     e.alias = -1;
     e.backdrop = 0;
+    e.audio = NULL;
     memset(&e.img, 0, sizeof(e.img));
     e.path = malloc(strlen(dir) + n + 1);
     strcpy(e.path, dir);
@@ -138,7 +140,7 @@ static void add(const char *dir, const char *name) {
    once: the others are aliases of the first); the renderer draws it once over the whole screen where the first of
    them comes in a frame and leaves the rest out (gs_draw.c). */
 static void backdrop(const char *dir, const char *name) {
-    char path[1024], line[256], video[1024] = "";
+    char path[1024], line[256], video[1024] = "", audio[1024] = "";
     FILE *f;
     int first = -1, pass;
 
@@ -159,6 +161,10 @@ static void backdrop(const char *dir, const char *name) {
                 if (pass == 0) { snprintf(video, sizeof(video), "%s%s", dir, s + 6); }
                 continue;
             }
+            if (strncmp(s, "audio ", 6) == 0) {
+                if (pass == 0) { snprintf(audio, sizeof(audio), "%s%s", dir, s + 6); }
+                continue;
+            }
             if (pass == 1 && video[0] != '\0') {
                 char file[300];
                 uint32_t before = sCount;
@@ -171,6 +177,10 @@ static void backdrop(const char *dir, const char *name) {
                     strcpy(en->path, video);
                     en->backdrop = 1;
                     en->alias = first;
+                    if (audio[0] != '\0') {
+                        en->audio = malloc(strlen(audio) + 1);
+                        strcpy(en->audio, audio);
+                    }
                     if (first < 0) { first = (int)(sCount - 1); }
                 }
             }
@@ -566,6 +576,10 @@ static void trim(uint32_t keep) {
 
 int TexPack_IsBackdrop(int id) {
     return id >= 0 && (uint32_t)id < sCount && sEntries[id].backdrop;
+}
+
+const char *TexPack_BackdropAudio(int id) {
+    return id >= 0 && (uint32_t)id < sCount && sEntries[id].backdrop ? sEntries[id].audio : NULL;
 }
 
 int TexPack_Get(int id, TexPackImage *img) {

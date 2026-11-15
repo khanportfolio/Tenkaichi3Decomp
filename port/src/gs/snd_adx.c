@@ -406,6 +406,7 @@ static void SDLCALL feed(void *user, SDL_AudioStream *stream, int additional, in
      voices  the two voice players and the two fighters' effect banks (slots 4 and 5)
      effects the rest: the two effect players, the common banks */
 int gPortMusicPercent = 100, gPortSePercent = 100, gPortVoicePercent = 100, gPortStagePercent = 100;
+int gPortMusicDuck; /* a menu backdrop's own sound is playing (gs_draw.c backdrop_sound): the music player is silent */
 /* "Music follows game speed" (Audio tab, setting music_follows_speed, off by default). Off: music and a stage's
    background that loop are played as they are at any game speed: the game never waits for the end of a loop, so
    nothing has to fit, and the songs are heard untouched. What plays once (a jingle, a spoken line) is always
@@ -420,6 +421,9 @@ static float player_gain(Player *p) {
     int ch = (int)(p - sPlayers); /* (the game makes its six players in the order of include/sys/adx.h) */
     int percent = ch == 0 ? gPortMusicPercent : ch == 1 ? gPortStagePercent : ch == 4 || ch == 5 ? gPortVoicePercent : gPortSePercent;
 
+    if (ch == 0 && gPortMusicDuck) {
+        return 0.0f;
+    }
     return p->vol <= -960 ? 0.0f : (float)pow(10.0, (double)p->vol / 200.0) * (float)percent / 100.0f * PortA11y_StreamGain(p);
 }
 

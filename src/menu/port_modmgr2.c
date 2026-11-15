@@ -3084,9 +3084,9 @@ static f32 Mg_Beat(ModGrid *g, s32 period) {
 #define MG_PY 115.0f
 #define MG_W 118.0f
 #define MG_H 103.0f
-#define MG_MODEL_X 1100.0f   /* the model, close: from its waist up above the name plate, its legs below the screen */
-#define MG_MODEL_FEET 975.0f
-#define MG_MODEL_H 1050.0f
+#define MG_MODEL_X 1530.0f   /* the whole fighter standing above the name plate (15 Nov 2026, the user: the close view */
+#define MG_MODEL_FEET 745.0f /* from the waist up was too big for the frame) */
+#define MG_MODEL_H 560.0f
 
 
 #define MG_OUT_T 6  /* frames the one shown takes to slide off */

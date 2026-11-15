@@ -186,6 +186,7 @@ typedef struct Tex {
     int anim;                /* an animated replacement's pack id (anim_step), or -1 */
     uint32_t animFrame;      /* and the frame it shows */
     int backdrop;            /* its replacement is a menu's backdrop video (gs_texpack.c backdrop; GsGpu_Draw) */
+    int backdropId;          /* and that replacement's pack id (its sound: TexPack_BackdropAudio) */
 } Tex;
 static Tex sTex[MAX_TEX];
 static uint16_t sTexBucket[TEX_BUCKETS]; /* index + 1 of a cache entry, 0 = empty (open addressing) */
@@ -516,7 +517,7 @@ static GsTex texture_get(int ctx) {
     uint64_t tex_t0;
     TexPackImage pack;
     uint32_t packMaxAlpha = 255, rw = tw, rh = th;
-    int replaced = 0, menuText = 0, sharedText = 0, battleText = 0, packWait = -1, animId = -1, isBackdrop = 0;
+    int replaced = 0, menuText = 0, sharedText = 0, battleText = 0, packWait = -1, animId = -1, isBackdrop = 0, backdropId = -1;
 
     if (tw > 1024) { tw = 1024; }
     if (th > 1024) { th = 1024; }
@@ -600,6 +601,7 @@ static GsTex texture_get(int ctx) {
         int id = TexPack_Lookup(tbp, tbw, psm, tw, th, (uint32_t)((t0 >> 34) & 1), cbp, cpsm, &packMaxAlpha);
         int got = id >= 0 ? TexPack_Get(id, &pack) : -1;
         isBackdrop = TexPack_IsBackdrop(id);
+        backdropId = isBackdrop ? id : -1;
         if (got > 0 && sBackend->texSlotsLeft() >= pack.levels) {
             replaced = 1;
             animId = pack.frames > 1 ? id : -1;
@@ -706,6 +708,7 @@ static GsTex texture_get(int ctx) {
     t->anim = animId;
     t->animFrame = 0;
     t->backdrop = isBackdrop;
+    t->backdropId = backdropId;
     return t->tex;
 }
 
@@ -1344,7 +1347,48 @@ void GsGpu_PagesMoved(uint32_t delta) {
     }
 }
 
+/* A menu backdrop's own sound (backdrop.txt "audio"): started when its backdrop is drawn, looping, with the game's
+   music player silent (snd_adx.c gPortMusicDuck); stopped half a second after the backdrop was last drawn, the music
+   back. (15 Nov 2026: the user's home-screen video sound had been put in place of a music file the game also plays
+   at the character select and in fights.) */
+extern void *PortMa_Start(const char *path, int loop);
+extern void PortMa_Stop(void *handle);
+extern void PortMa_SetVolume(void *handle, float gain);
+extern void Port_AudioRefresh(void);
+extern int gPortMusicDuck, gPortMusicPercent;
+static void *sBdSound;
+static const char *sBdPath;
+static unsigned sBdSeen;
+
+static void backdrop_sound(const char *path) {
+    sBdSeen = gGsFrame;
+    if (path == NULL || (sBdSound != NULL && sBdPath == path)) {
+        return;
+    }
+    if (sBdSound != NULL) {
+        PortMa_Stop(sBdSound);
+    }
+    sBdSound = PortMa_Start(path, 1);
+    sBdPath = path;
+    if (sBdSound != NULL) {
+        PortMa_SetVolume(sBdSound, (float)gPortMusicPercent / 100.0f);
+        gPortMusicDuck = 1;
+        Port_AudioRefresh();
+    }
+}
+
+static void backdrop_sound_tick(void) {
+    if (sBdSound != NULL && gGsFrame > sBdSeen + 30) {
+        PortMa_Stop(sBdSound);
+        sBdSound = NULL;
+        sBdPath = NULL;
+        gPortMusicDuck = 0;
+        Port_AudioRefresh();
+    }
+}
+
 void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
+    backdrop_sound_tick();
     if (GS_NO_PICTURE) { /* a frame that is only being re-run, or one that is skipped: nothing is drawn */
         return;
     }
@@ -1398,6 +1442,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
             return;
         }
         sBackdropFrame = gGsFrame + 1;
+        backdrop_sound(TexPack_BackdropAudio(sLast->backdropId));
         bx0 = (float)d.scissor[0] / (float)SCALE;
         by0 = (float)d.scissor[1] / (float)SCALE;
         bx1 = (float)(d.scissor[0] + d.scissor[2]) / (float)SCALE;
