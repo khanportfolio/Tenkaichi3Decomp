@@ -601,6 +601,14 @@ static void set_open(bool open) {
     input_owner();
 }
 
+// The game's Options screen (src/menu/menu_x_c.c): "Screen" opens this window on Video, "Controller" on Controls
+// (15 Nov 2026, the user: the graphics and the keyboard controls inside the game's own settings). The window is
+// over the game's page; closing it goes back to that page.
+extern "C" void Port_UiOpenTab(int tabIndex) {
+    sForceTab = tabIndex;
+    set_open(true);
+}
+
 static void capture(int kind, int player, int action) {
     sCapKind = kind; sCapPlayer = player; sCapAction = action; gPortInputCapture = 1;
     sCapUntil = SDL_GetTicks() + 5000;

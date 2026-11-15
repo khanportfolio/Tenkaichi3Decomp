@@ -171,6 +171,10 @@ s32 Option_Init(s32 section) {
 }
 
 /* The screen's frame loop; input is skipped while a memory card flow runs. Returns 0. */
+#ifdef PORT
+extern void Port_UiOpenTab(int tabIndex); /* port/src/gs/ui.cpp: the PC settings window on a tab (0 Video, 4 Controls) */
+#endif
+
 s32 Option_Run(s32 section) {
     Option_Init(section);
     ColorFade_StartIn(0, 0, 0, 20);
@@ -297,6 +301,9 @@ s32 Option_Input(void) {
                 gOption->fromPage = 0;
                 gOption->page = 1;
                 OPT_VOICE(gOption->cursor);
+#ifdef PORT
+                Port_UiOpenTab(0); /* the graphics: the PC window's Video page over the screen page */
+#endif
             } else if (gOption->state == OPT_ITEM_SOUND) {
                 Flash_GotoLabel(&gOption->flash[0], "fl_menu_change", 1);
                 OPT_PLATE(OPT_CLIP_ROW, "fl_off_start");
@@ -315,6 +322,9 @@ s32 Option_Input(void) {
                 gOption->fromPage = 0;
                 gOption->page = 3;
                 OPT_VOICE(gOption->voiceLine);
+#ifdef PORT
+                Port_UiOpenTab(4); /* the controls and the keyboard keys: the PC window's Controls page */
+#endif
             }
             gOption->greeted = 1;
         } else if (gPad[0].gamePressed & PADG_TRIANGLE) {
