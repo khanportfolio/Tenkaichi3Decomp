@@ -3084,9 +3084,18 @@ static f32 Mg_Beat(ModGrid *g, s32 period) {
 #define MG_PY 115.0f
 #define MG_W 118.0f
 #define MG_H 103.0f
-#define MG_MODEL_X 1530.0f   /* the whole fighter standing above the name plate (15 Nov 2026, the user: the close view */
-#define MG_MODEL_FEET 745.0f /* from the waist up was too big for the frame) */
-#define MG_MODEL_H 560.0f
+/* the whole fighter standing above the name plate (15 Nov 2026). At 1530 it stood at the screen's right edge, cut
+   (the smaller fighter is further from the camera, so its step across is larger): 1318 puts it over the plate.
+   BT3_MG_X / BT3_MG_FEET / BT3_MG_H (testing) override the three. */
+static f32 Mg_Env(const char *name, f32 def) {
+    extern char *getenv(const char *name);
+    extern double atof(const char *s);
+    char *e = getenv(name);
+    return e != NULL && e[0] != 0 ? (f32)atof(e) : def;
+}
+#define MG_MODEL_X Mg_Env("BT3_MG_X", 1318.0f)
+#define MG_MODEL_FEET Mg_Env("BT3_MG_FEET", 745.0f)
+#define MG_MODEL_H Mg_Env("BT3_MG_H", 560.0f)
 
 
 #define MG_OUT_T 6  /* frames the one shown takes to slide off */
