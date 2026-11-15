@@ -18,6 +18,7 @@
 #include "menu_translation.h"
 #include "../quit_dialog.h"
 #include "net_chat.h"
+#include "net_voice.h"
 
 static int sMeter = -1; // the meter (frame rate, connection): -1 not read yet
 static bool meter_on(void);
@@ -1506,15 +1507,19 @@ static void misc_tab(void) {
     }
     ImGui::SetItemTooltip("The two games compare what they compute. Off: when they no longer agree you are told, and the match\n"
                           "goes on (the two screens may then show different fights). On: the match ends there.");
+    bool mic = PortVoice_MicOn() != 0;
+    if (ImGui::Checkbox("Mic on (voice with the other player)", &mic)) {
+        PortVoice_MicSet(mic);
+    }
+    ImGui::SetItemTooltip("Your microphone is heard by the other player of an online match, and theirs by you.\n"
+                          "Ctrl+M or the MIC button at the top right during the match turns it on and off.");
     bool withMods = Port_Setting("net_mods", 0) != 0;
     if (ImGui::Checkbox("Online with my mods (Super characters)", &withMods)) {
         Port_SettingSave("net_mods", withMods);
         Port_SettingsWrite();
     }
-    ImGui::SetItemTooltip("Off: every online match is the original game, so you can play anyone.
-"
-                          "On: when the other player has exactly the same mod pack (same characters folder, same game
-"
+    ImGui::SetItemTooltip("Off: every online match is the original game, so you can play anyone.\n"
+                          "On: when the other player has exactly the same mod pack (same characters folder, same game\n"
                           "version) and this on too, the match has all the added characters. Anyone else: the original game.");
     bool chat = PortChat_Enabled() != 0;
     if (ImGui::Checkbox("Online chat", &chat)) {
@@ -2767,6 +2772,29 @@ static bool frame_build(void) {
     }
     if (chat) {
         chat_draw();
+    }
+    if (PortVoice_Shown()) { // the mic badge, top right, in an online match; Ctrl+M turns the mic on and off
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_M, false)) {
+            PortVoice_MicSet(!PortVoice_MicOn());
+        }
+        ImGuiIO &vio = ImGui::GetIO();
+        ImGui::SetNextWindowPos(ImVec2(vio.DisplaySize.x - 8, 8), ImGuiCond_Always, ImVec2(1, 0));
+        ImGui::SetNextWindowBgAlpha(0.55f);
+        if (ImGui::Begin("##mic", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
+            bool on = PortVoice_MicOn() != 0;
+            ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.1f, 0.55f, 0.2f, 1) : ImVec4(0.55f, 0.12f, 0.12f, 1));
+            if (ImGui::Button(on ? "MIC ON" : "MIC OFF")) {
+                PortVoice_MicSet(!on);
+            }
+            ImGui::PopStyleColor();
+            ImGui::SetItemTooltip("Your microphone to the other player. Ctrl+M turns it on and off.");
+            if (PortVoice_TheyTalk()) {
+                ImGui::SameLine();
+                ImGui::TextColored(ImVec4(0.4f, 1, 0.5f, 1), "%s is talking", Port_NetName(!Port_NetMe()));
+            }
+        }
+        ImGui::End();
     }
     if (names && GsDraw_HudShown() && gUiPresentW > 0 && gUiPresentH > 0) { // (with the HUD: not over an intro)
         // Under each side's health bar (the game's 512 x 448 page: the bars end at about y 50). The left place is

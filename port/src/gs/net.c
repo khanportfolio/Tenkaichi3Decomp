@@ -49,7 +49,8 @@ enum { T_HELLO = 1, T_HELLO_ACK = 2, T_INPUT = 3, T_BYE = 4, T_PING = 5, T_PONG 
        T_PUNCH = 9 /* nothing to read: sent so that the sender's router lets the other side's packets in (room codes) */,
        T_CHAT = 10 /* a line of text between the players (net_chat.c): its number, its length, its bytes. Not part of
                       the game: a copy without the chat ignores it, so NET_VERSION stays */,
-       T_FPRINT = 12 /* the sender's gameplay fingerprint (fprint_send, below); a copy without it ignores it */ };
+       T_FPRINT = 12 /* the sender's gameplay fingerprint (fprint_send, below); a copy without it ignores it */,
+       T_VOICE = 13 /* 20 ms of the sender's microphone (net_voice.c); not part of the match, a copy without it ignores it */ };
 /* The version of what goes over the line. The greeting and its answer carry it, and two copies that differ do not
    start a match (the input packets changed with version 2: times for the ping were added; a copy that read them
    the old way took them for input). 1 was releases 0.1.8 and 0.1.9, which said no version. */
@@ -66,6 +67,7 @@ static const uint32_t kVersion = NET_VERSION;
 #include "net_match.h"
 #include "net_relay.h"
 #include "net_chat.h"
+#include "net_voice.h"
 static int sLobbyOther;
 
 /* What the meter shows (ui.cpp): the round trip time, and per second how often the game went back, how far, and
@@ -406,7 +408,7 @@ static SDL_EnumerationResult SDLCALL mods_walk(void *ud, const char *dir, const 
     char path[1024];
     size_t d = strlen(dir);
     SDL_PathInfo info;
-    snprintf(path, sizeof(path), "%s%s%s", dir, d > 0 && (dir[d - 1] == '/' || dir[d - 1] == '\') ? "" : "/", name);
+    snprintf(path, sizeof(path), "%s%s%s", dir, d > 0 && (dir[d - 1] == '/' || dir[d - 1] == '\\') ? "" : "/", name);
     if (!SDL_GetPathInfo(path, &info)) {
         return SDL_ENUM_CONTINUE;
     }
@@ -416,7 +418,7 @@ static SDL_EnumerationResult SDLCALL mods_walk(void *ud, const char *dir, const 
         char *q = l->names[l->count++];
         snprintf(q, 320, "%s", path + l->base);
         for (; *q; q++) {
-            if (*q == '\') {
+            if (*q == '\\') {
                 *q = '/';
             }
         }
@@ -463,8 +465,7 @@ static unsigned long long mods_mine(void) {
 #else
     mods_file(&h, "/proc/self/exe");
 #endif
-    fprintf(stderr, "bt3: net: added characters: %d files, mods number %016llx
-", l.count, h);
+    fprintf(stderr, "bt3: net: added characters: %d files, mods number %016llx\n", l.count, h);
     free(l.names);
     return sModsMine = h ? h : 1;
 }
@@ -479,8 +480,7 @@ static void mods_take(const uint8_t *at) { /* {MOD_MARK, low, high} of the other
     memcpy(v, at, 12);
     theirs = (unsigned long long)v[1] | (unsigned long long)v[2] << 32;
     sModsShared = v[0] == MOD_MARK && mods_offer() != 0 && theirs == mods_offer();
-    fprintf(stderr, "bt3: net: %s
-", sModsShared ? "the other player has the same mods: added characters on in this session"
+    fprintf(stderr, "bt3: net: %s\n", sModsShared ? "the other player has the same mods: added characters on in this session"
                                                    : "the mods differ: the disc's game in this session");
 }
 
@@ -757,6 +757,21 @@ static void chat_send(void) {
     }
 }
 
+/* This player's voice, when the microphone is on (net_voice.c): a few 20 ms packets at most each time. */
+static void voice_send(void) {
+    uint8_t pkt[8 + VOICE_FRAME];
+    uint32_t head[2] = {MAGIC, T_VOICE};
+    int len, k;
+    if (!sConnected) {
+        return;
+    }
+    PortVoice_Live();
+    for (k = 0; k < 4 && (len = PortVoice_Outgoing(pkt + 8)) > 0; k++) {
+        memcpy(pkt, head, 8);
+        send_to_peer(pkt, 8 + len);
+    }
+}
+
 /* Takes in what has arrived. Returns 1 if anything did. */
 static int receive(void) {
     uint8_t pkt[2048];
@@ -766,6 +781,7 @@ static int receive(void) {
 
     queue_flush();
     chat_send();
+    voice_send();
     while ((n = net_recv(pkt, (int)sizeof(pkt), &from)) >= 8) {
         uint32_t magic, type;
         memcpy(&magic, pkt, 4);
@@ -811,6 +827,8 @@ static int receive(void) {
             net_send(ack, sizeof(ack), &from);
         } else if (type == T_CONFIG_ACK && sMode == 1) {
             sCfgAcked = 1;
+        } else if (type == T_VOICE && sConnected && n > 8) {
+            PortVoice_Heard(pkt + 8, n - 8);
         } else if (type == T_CHAT && sConnected && n >= 16) { /* (from the other player's address only: above) */
             uint32_t seq, len;
             memcpy(&seq, pkt + 8, 4);
@@ -1011,6 +1029,7 @@ static void net_start(int role, const char *host, const char *join) {
     memset(sIn, 0, sizeof(sIn));
     memset(sHave, 0, sizeof(sHave)); /* (a second session in one run starts as clean as the first) */
     PortChat_Reset();
+    PortVoice_Reset();
     sWaitNs = sWaits = 0;
     sFromLobby = sHandSock >= 0;
     if (sFromLobby) {
@@ -1941,6 +1960,7 @@ void Port_NetSessionEnd(void) {
     sMode = 0;
     sSession = 0;
     PortChat_Reset();
+    PortVoice_Reset();
     put_env("BT3_SAVES", sSavesWasSet ? sSavesBefore : NULL);
 }
 
@@ -1962,6 +1982,7 @@ void Port_NetLeave(void) {
         fprintf(stderr, "bt3: net: the two games differed from blank %u on (%u comparisons differed)\n", (unsigned)sApartAt, sApartCount);
     }
     PortChat_Reset();
+    PortVoice_Reset();
     if (sSock >= 0 && sConnected) { /* tell the other side, so that it does not wait for input that will not come */
         uint32_t bye[3] = {MAGIC, T_BYE, sByeWhy};
         int k;
