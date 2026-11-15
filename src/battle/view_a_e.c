@@ -26,6 +26,7 @@
 
 extern void *memset(void *dst, s32 c, u32 n);
 extern s32 sprintf(char *dst, const char *fmt, ...);
+extern int Port_NetModsHidden(void); /* port/src/gs/net.c: online, unless both players have the same mods */
 
 extern void Flash_FindLabel(Flash *flash, char *parent, char *name, FlashRef *out);
 extern void Flash_ClipSetFlags(Flash *flash, FlashRef *ref, s32 prop, s32 value);
@@ -876,7 +877,7 @@ void ChrGrid_Build(s32 *outCount, ChrGridCell *out, s32 *inCount, ChrGridCell *i
        (CHRGRID_NO_FORMS) so are they. They are never looked up in the save. Not in an online session (both players
        must have the same list), and not in the customising screens (modes 0x30..0x32), which write the save by
        the cell's place. */
-    if (!Port_NetSession() && Port_CharaCount() > 0 && !(mode >= 0x30 && mode < 0x33)) {
+    if (!Port_NetModsHidden() && Port_CharaCount() > 0 && !(mode >= 0x30 && mode < 0x33)) {
         s32 n = *outCount, k, first = n;
         while (n > 0 && out[n - 1].id == CHRGRID_ID_EMPTY) {
             n--;

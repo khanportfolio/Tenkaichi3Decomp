@@ -348,7 +348,8 @@ s32 ChrView_IsVisible(void) {
    read whole whatever the buffer's size. In an online session the original's. */
 extern int Port_ModelSize(void);
 extern int Port_NetSession(void);
-#define ChrView_ModelSize() (Port_NetSession() ? CHRVIEW_MODEL_SIZE : Port_ModelSize())
+extern int Port_NetModsHidden(void); /* gs/net.c: online, unless both players have the same mods */
+#define ChrView_ModelSize() (Port_NetModsHidden() ? CHRVIEW_MODEL_SIZE : Port_ModelSize())
 #else
 #define ChrView_ModelSize() CHRVIEW_MODEL_SIZE
 #endif

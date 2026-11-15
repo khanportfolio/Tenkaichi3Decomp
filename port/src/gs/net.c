@@ -365,6 +365,131 @@ static const char kDataDiffer[] = "Your game data and the other player's are not
                                   "an online match needs the same on both.";
 static int sDataBad; /* the other side's fingerprint differs from this side's */
 
+/* Same mods online (15 Nov 2026): one number for this copy's added characters: every file of the characters folder
+   (names and contents, in name order), story_talk.txt and the program itself. It rides at the end of the greeting
+   (T_HELLO) and of its answer (T_HELLO_ACK), which older copies read only up to what they know. When both sides
+   have the same number, both know it before they connect, and the session shows the added characters as offline
+   (Port_NetModsHidden() is 0): both games load the same files with the same program, so they compute the same
+   fight. Otherwise, or with no added characters, the session is the disc's game as before. */
+enum { MOD_MARK = 0x4D4F4431 };
+static int sModsShared;
+static unsigned long long sModsMine;
+static int sModsKnown;
+extern int PortExtras_Dir(const char *kind, const char *env, char *out, unsigned size); /* plat_extras.c */
+
+static void mods_fnv(unsigned long long *h, const void *p, size_t n) {
+    const unsigned char *b = p;
+    while (n--) {
+        *h ^= *b++;
+        *h *= 1099511628211ull;
+    }
+}
+static void mods_file(unsigned long long *h, const char *path) {
+    static unsigned char buf[65536];
+    size_t n;
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        return;
+    }
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        mods_fnv(h, buf, n);
+    }
+    fclose(f);
+}
+typedef struct {
+    char (*names)[320];
+    int count, cap;
+    size_t base;
+} ModList;
+static SDL_EnumerationResult SDLCALL mods_walk(void *ud, const char *dir, const char *name) {
+    ModList *l = ud;
+    char path[1024];
+    size_t d = strlen(dir);
+    SDL_PathInfo info;
+    snprintf(path, sizeof(path), "%s%s%s", dir, d > 0 && (dir[d - 1] == '/' || dir[d - 1] == '\') ? "" : "/", name);
+    if (!SDL_GetPathInfo(path, &info)) {
+        return SDL_ENUM_CONTINUE;
+    }
+    if (info.type == SDL_PATHTYPE_DIRECTORY) {
+        SDL_EnumerateDirectory(path, mods_walk, ud);
+    } else if (info.type == SDL_PATHTYPE_FILE && l->count < l->cap && strlen(path) > l->base) {
+        char *q = l->names[l->count++];
+        snprintf(q, 320, "%s", path + l->base);
+        for (; *q; q++) {
+            if (*q == '\') {
+                *q = '/';
+            }
+        }
+    }
+    return SDL_ENUM_CONTINUE;
+}
+static int mods_cmp(const void *a, const void *b) {
+    return strcmp((const char *)a, (const char *)b);
+}
+static unsigned long long mods_mine(void) {
+    char root[512], path[1024];
+    ModList l = {0};
+    int i;
+    unsigned long long h = 1469598103934665603ull;
+    if (sModsKnown) {
+        return sModsMine;
+    }
+    sModsKnown = 1;
+    if (!PortExtras_Dir("characters", "BT3_CHARACTERS", root, sizeof(root))) {
+        return sModsMine = 0;
+    }
+    l.cap = 8192;
+    l.names = calloc((size_t)l.cap, sizeof(*l.names));
+    if (l.names == NULL) {
+        return sModsMine = 0;
+    }
+    l.base = strlen(root);
+    SDL_EnumerateDirectory(root, mods_walk, &l);
+    if (l.count == 0) {
+        free(l.names);
+        return sModsMine = 0;
+    }
+    qsort(l.names, (size_t)l.count, sizeof(*l.names), mods_cmp);
+    for (i = 0; i < l.count; i++) {
+        mods_fnv(&h, l.names[i], strlen(l.names[i]) + 1);
+        snprintf(path, sizeof(path), "%s/%s", root, l.names[i]);
+        mods_file(&h, path);
+    }
+    mods_file(&h, "story_talk.txt");
+#ifdef _WIN32
+    if (GetModuleFileNameA(NULL, path, sizeof(path)) > 0) {
+        mods_file(&h, path);
+    }
+#else
+    mods_file(&h, "/proc/self/exe");
+#endif
+    fprintf(stderr, "bt3: net: added characters: %d files, mods number %016llx
+", l.count, h);
+    free(l.names);
+    return sModsMine = h ? h : 1;
+}
+extern int Port_Setting(const char *name, int def); /* plat_settings.c */
+/* this side's number as sent: 0 (none) unless the player turned on "Online with my mods" */
+static unsigned long long mods_offer(void) {
+    return Port_Setting("net_mods", 0) ? mods_mine() : 0;
+}
+static void mods_take(const uint8_t *at) { /* {MOD_MARK, low, high} of the other side */
+    uint32_t v[3];
+    unsigned long long theirs;
+    memcpy(v, at, 12);
+    theirs = (unsigned long long)v[1] | (unsigned long long)v[2] << 32;
+    sModsShared = v[0] == MOD_MARK && mods_offer() != 0 && theirs == mods_offer();
+    fprintf(stderr, "bt3: net: %s
+", sModsShared ? "the other player has the same mods: added characters on in this session"
+                                                   : "the mods differ: the disc's game in this session");
+}
+
+/* 1 while the added characters are hidden: an online session, unless both players have the same mods. */
+int Port_NetModsHidden(void) {
+    extern int Port_NetSession(void);
+    return Port_NetSession() && !sModsShared;
+}
+
 static int fprint_mine(unsigned long long *fp) {
     if (Port_DataFingerprint(fp) != 1) {
         return 0;
@@ -710,8 +835,18 @@ static int receive(void) {
             uint32_t ack[3] = {MAGIC, T_HELLO_ACK, NET_VERSION};
             net_send(ack, sizeof(ack), &from);
         } else if (type == T_HELLO && sMode == 1) {
-            uint32_t ack[8 + NAME_LEN / 4] = {MAGIC, T_HELLO_ACK, (uint32_t)sDelay, (uint32_t)sRollMax, NET_VERSION, sRules};
+            uint32_t ack[11 + NAME_LEN / 4] = {MAGIC, T_HELLO_ACK, (uint32_t)sDelay, (uint32_t)sRollMax, NET_VERSION, sRules};
+            unsigned long long mm = mods_offer();
             ack[7 + NAME_LEN / 4] = sSeed;
+            ack[8 + NAME_LEN / 4] = MOD_MARK;
+            ack[9 + NAME_LEN / 4] = (uint32_t)mm;
+            ack[10 + NAME_LEN / 4] = (uint32_t)(mm >> 32);
+            if (!sConnected) {
+                sModsShared = 0;
+                if (n >= 32 + NAME_LEN) {
+                    mods_take(pkt + 20 + NAME_LEN);
+                }
+            }
             memcpy(&ack[6], sMyName, NAME_LEN);
             ack[6 + NAME_LEN / 4] = sOpts[0];
             if (n >= 12 + NAME_LEN) { /* the other player's name came with the greeting */
@@ -763,6 +898,10 @@ static int receive(void) {
                 }
                 if (n >= 32 + NAME_LEN) {
                     memcpy(&sSeed, pkt + 28 + NAME_LEN, 4);
+                }
+                sModsShared = 0;
+                if (n >= 44 + NAME_LEN) {
+                    mods_take(pkt + 32 + NAME_LEN);
                 }
                 memcpy(sNames[1], sMyName, NAME_LEN);
                 sCfgGot = 1;
@@ -928,6 +1067,8 @@ static void net_start(int role, const char *host, const char *join) {
     sGone = 0;
     sVersionBad = 0;
     sDataBad = 0;
+    sModsShared = 0;
+    mods_mine(); /* (worked out once, before any greeting) */
     sEchoTs = 0;
     sPingMs = -1;
     sSecRoll = sSecRollTicks = sSecWaits = sSecWaitMs = sSecTicks = 0;
@@ -1015,10 +1156,14 @@ static void net_start(int role, const char *host, const char *join) {
             last = now;
         }
         if (sMode == 2 && now - last > 100000000ull) {
-            uint32_t hello[5 + NAME_LEN / 4] = {MAGIC, T_HELLO, NET_VERSION};
+            uint32_t hello[8 + NAME_LEN / 4] = {MAGIC, T_HELLO, NET_VERSION};
+            unsigned long long mm = mods_offer();
             memcpy(&hello[3], sMyName, NAME_LEN);
             hello[3 + NAME_LEN / 4] = sOpts[1];
             hello[4 + NAME_LEN / 4] = CAP_MARK | 3;
+            hello[5 + NAME_LEN / 4] = MOD_MARK;
+            hello[6 + NAME_LEN / 4] = (uint32_t)mm;
+            hello[7 + NAME_LEN / 4] = (uint32_t)(mm >> 32);
             fprint_send(&sPeer);
             net_send(hello, sizeof(hello), &sPeer);
             last = now;

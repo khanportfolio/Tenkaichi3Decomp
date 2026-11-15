@@ -122,11 +122,12 @@ static int sOrderCount;
    program again does not read the folder either (PortCharas_Init). One that begins in the running program
    (gs/state.c) finds the folder read: live() and rlive() hide it until the session is over. */
 extern int Port_NetSession(void); /* gs/net.c */
+extern int Port_NetModsHidden(void); /* gs/net.c: online, unless both players have the same mods */
 static int live(void) {
-    return Port_NetSession() ? 0 : sCount;
+    return Port_NetModsHidden() ? 0 : sCount;
 }
 static int rlive(void) {
-    return Port_NetSession() ? 0 : sReplCount;
+    return Port_NetModsHidden() ? 0 : sReplCount;
 }
 
 /* the package that replaces disc character `id`, NULL if none (always NULL in a session) */
@@ -149,7 +150,7 @@ static int id_of(const Chara *c) {
 /* Changes whenever what the game's file numbers answer may have changed: with a session's start and end, and with
    each reading of the folder again; the open files are then looked up again (plat_fcache.c). */
 int PortCharas_Epoch(void) {
-    return (Port_NetSession() ? 1 : 0) + 2 * (sReloads + sPreviews);
+    return (Port_NetModsHidden() ? 1 : 0) + 2 * (sReloads + sPreviews);
 }
 
 /* ---- the folder scan ---------------------------------------------------------------------------------------- */
@@ -1535,7 +1536,7 @@ int Port_CharaStat(int chara, int which, int value) {
 int Port_CharaOmni(int chara) {
     const Chara *c;
     PortCharas_Init();
-    if (Port_NetSession()) {
+    if (Port_NetModsHidden()) {
         return 0;
     }
     c = chara_of(chara);
@@ -1548,7 +1549,7 @@ int Port_CharaOmni(int chara) {
 int Port_CharaUltBlast(int chara) {
     const Chara *c;
     PortCharas_Init();
-    if (Port_NetSession()) {
+    if (Port_NetModsHidden()) {
         return 0;
     }
     c = chara_of(chara);
@@ -1560,7 +1561,7 @@ int Port_CharaUltBlast(int chara) {
 int Port_CharaDamage(int chara, int damage) {
     const Chara *c;
     PortCharas_Init();
-    if (Port_NetSession()) {
+    if (Port_NetModsHidden()) {
         return damage;
     }
     c = chara_of(chara);
@@ -1642,7 +1643,7 @@ void Port_ActionHit(int attackerSide) {
 int Port_ActionWatchdog(int side, int action, int frames) {
     int rush = action >= 0x12D && action <= 0x12F, limit = rush ? WATCHDOG_RUSH_FRAMES : WATCHDOG_FRAMES;
 
-    if (Port_NetSession()) {
+    if (Port_NetModsHidden()) {
         return 0;
     }
     if (side == 0 || side == 1) {
@@ -2194,7 +2195,7 @@ static void *sChipRes[PORT_CHARA_MAX];
 /* (In a session neither does anything: the chips a screen of the player's own game had loaded when the session was
    asked for lie in that game's memory, which comes back as it was when the session is over.) */
 void PortChips_Free(void) {
-    if (Port_NetSession()) {
+    if (Port_NetModsHidden()) {
         return;
     }
     if (sChipMem != NULL) {
@@ -2211,7 +2212,7 @@ void PortChips_Load(void *pack) {
     static unsigned char file[CHIP_SIZE];
     unsigned *words = pack;
     int i;
-    if (Port_NetSession()) {
+    if (Port_NetModsHidden()) {
         return;
     }
     PortCharas_Init();

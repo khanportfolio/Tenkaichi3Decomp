@@ -1193,8 +1193,9 @@ void BtlRes_CommitReload(void) {
    (where both games must be the same in every byte), they are the original's. */
 extern int Port_ModelSize(void);
 extern int Port_NetSession(void);
+extern int Port_NetModsHidden(void); /* gs/net.c: online, unless both players have the same mods */
 static s32 BtlRes_ModelSize(void) {
-    return Port_NetSession() ? BTL_RES_MODEL_SIZE : Port_ModelSize();
+    return Port_NetModsHidden() ? BTL_RES_MODEL_SIZE : Port_ModelSize();
 }
 #else
 #define BtlRes_ModelSize() BTL_RES_MODEL_SIZE

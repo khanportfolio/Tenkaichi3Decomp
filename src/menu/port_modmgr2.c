@@ -2967,10 +2967,10 @@ void PortMods_PatchSelect(void *names, void *forms, u32 *chips) {
     s32 count = Port_ModCount();
     s32 i;
     s32 k;
-    extern int Port_NetSession(void); /* port/src/gs/net.c */
+    extern int Port_NetModsHidden(void); /* port/src/gs/net.c */
 
-    if (Port_NetSession()) {
-        return; /* online: the game as it is on the disc, names and faces too */
+    if (Port_NetModsHidden()) {
+        return; /* online: the game as it is on the disc, names and faces too (unless both have the same mods) */
     }
     for (i = 0; i < count; i++) {
         Port_ModGetInfo(i, &m);

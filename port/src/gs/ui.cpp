@@ -1506,6 +1506,16 @@ static void misc_tab(void) {
     }
     ImGui::SetItemTooltip("The two games compare what they compute. Off: when they no longer agree you are told, and the match\n"
                           "goes on (the two screens may then show different fights). On: the match ends there.");
+    bool withMods = Port_Setting("net_mods", 0) != 0;
+    if (ImGui::Checkbox("Online with my mods (Super characters)", &withMods)) {
+        Port_SettingSave("net_mods", withMods);
+        Port_SettingsWrite();
+    }
+    ImGui::SetItemTooltip("Off: every online match is the original game, so you can play anyone.
+"
+                          "On: when the other player has exactly the same mod pack (same characters folder, same game
+"
+                          "version) and this on too, the match has all the added characters. Anyone else: the original game.");
     bool chat = PortChat_Enabled() != 0;
     if (ImGui::Checkbox("Online chat", &chat)) {
         PortChat_EnabledSet(chat);
