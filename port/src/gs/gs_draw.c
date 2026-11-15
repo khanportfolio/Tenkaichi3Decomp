@@ -1360,9 +1360,25 @@ static void *sBdSound;
 static const char *sBdPath;
 static unsigned sBdSeen;
 
+static void backdrop_stop(void) {
+    if (sBdSound != NULL) {
+        PortMa_Stop(sBdSound);
+        sBdSound = NULL;
+        sBdPath = NULL;
+        gPortMusicDuck = 0;
+        Port_AudioRefresh();
+    }
+}
+
 static void backdrop_sound(const char *path) {
+    if (path == NULL) {
+        /* a backdrop without its own sound (the Versus Menu's): the home screen's stops at once, the music is back.
+           (15 Nov 2026: it went on counting as shown here, and played on into the character select over the music) */
+        backdrop_stop();
+        return;
+    }
     sBdSeen = gGsFrame;
-    if (path == NULL || (sBdSound != NULL && sBdPath == path)) {
+    if (sBdSound != NULL && sBdPath == path) {
         return;
     }
     if (sBdSound != NULL) {
@@ -1379,11 +1395,7 @@ static void backdrop_sound(const char *path) {
 
 static void backdrop_sound_tick(void) {
     if (sBdSound != NULL && gGsFrame > sBdSeen + 30) {
-        PortMa_Stop(sBdSound);
-        sBdSound = NULL;
-        sBdPath = NULL;
-        gPortMusicDuck = 0;
-        Port_AudioRefresh();
+        backdrop_stop();
     }
 }
 
