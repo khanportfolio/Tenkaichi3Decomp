@@ -3143,7 +3143,7 @@ static void Mg_Draw(ModGrid *g, f32 in, f32 art) {
         }
     }
     Mx_Fit(MM_BALL, 100.0f, 72.0f + drop, 64.0f, 0x80);
-    Mx_Heading(146.0f, 72.0f + drop, "MOD FIGHTERS", 50.0f, 500.0f, 0);
+    Mx_Heading(146.0f, 72.0f + drop, "SUPER FIGHTERS", 50.0f, 500.0f, 0);
     Mx_Rect(110.0f, 110.0f + drop, 640.0f, 113.0f + drop, Mx_Rgba(0xF0, 0xC8, 0xFF, 0x70), Mx_Rgba(0xB0, 0x88, 0xE0, 0x70));
     Mx_BoxTint(MM_WINDOW, 55.0f, 133.0f, 835.0f, 655.0f, 34.0f, Mx_Rgba(0x50, 0x58, 0x90, 0x80), 0x78);
     for (i = 0; i < MG_COLS * MG_ROWS; i++) {
