@@ -1354,10 +1354,12 @@ void BtlHit_ApplyHit(HitChr *atk) {
     case 0x16:
     case 0x25:
 #ifdef PORT
+        /* (15 Nov 2026) the fighters by their member record, as the manifest knows them (199 = Zeno): the
+           battle object's own number was not that one, so omni and damage= never took effect */
         {
             s32 exact;
 
-            def->react.damage = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), BtlAtk_GetDamage(atk),
+            def->react.damage = Port_OmniDamage(BtlMember_GetActive(atk)->chara, BtlMember_GetActive(def)->chara, BtlAtk_GetDamage(atk),
                                                 BtlMember_GetActiveGauge(def)->healthMax, &exact);
         }
 #else
@@ -1398,7 +1400,7 @@ void BtlHit_ApplyHit(HitChr *atk) {
         {
             s32 exact;
 
-            dmg = Port_OmniDamage(BtlCharApi_GetChara(atk->objId), BtlCharApi_GetChara(def->objId), dmg,
+            dmg = Port_OmniDamage(BtlMember_GetActive(atk)->chara, BtlMember_GetActive(def)->chara, dmg,
                                   BtlMember_GetActiveGauge(def)->healthMax, &exact);
             if (exact) {
                 type |= 0x181; /* BTL_DMG_NO_DEFENSE | BTL_DMG_NO_HALVE | BTL_DMG_NO_SCALING */
