@@ -271,6 +271,49 @@ static SDL_GPUTexture *bar_texture(const char *file, const unsigned char *png, s
     return tex;
 }
 
+// The online room's lobby (16 Nov 2026, the user's picture of Capsule Corp, tbo/ui/lobby_bg.png): behind the room
+// window while a room waits, this player standing on the left, the other's place on the right dark with "Waiting for
+// your friend..." until they join; then both stand lit for a moment ("joined") before the match starts.
+static SDL_GPUTexture *sLobbyBg, *sLobbyP[2];
+static float sLobbyBgShape = 16.0f / 9.0f, sLobbyPShape[2] = {0.6f, 0.6f};
+static bool sLobbyTried;
+
+static void lobby_draw(bool joined) {
+    if (!sLobbyTried) {
+        sLobbyTried = true;
+        sLobbyBg = bar_texture("tbo/ui/lobby_bg.png", NULL, 0, &sLobbyBgShape);
+        sLobbyP[0] = bar_texture("tbo/ui/lobby_p1.png", NULL, 0, &sLobbyPShape[0]);
+        sLobbyP[1] = bar_texture("tbo/ui/lobby_p2.png", NULL, 0, &sLobbyPShape[1]);
+    }
+    if (sLobbyBg == NULL) {
+        return;
+    }
+    ImGuiIO &io = ImGui::GetIO();
+    ImDrawList *dl = ImGui::GetBackgroundDrawList();
+    float W = io.DisplaySize.x, H = io.DisplaySize.y;
+    float bw = W, bh = W / sLobbyBgShape; // (covers the screen, cut at the edges if its shape differs)
+    if (bh < H) {
+        bh = H;
+        bw = H * sLobbyBgShape;
+    }
+    dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)sLobbyBg), ImVec2((W - bw) * 0.5f, (H - bh) * 0.5f),
+                 ImVec2((W + bw) * 0.5f, (H + bh) * 0.5f));
+    for (int k = 0; k < 2; k++) {
+        float ph = H * 0.42f, pw = ph * sLobbyPShape[k], cx = W * (k == 0 ? 0.26f : 0.74f), floor = H * 0.86f;
+        bool lit = k == 0 || joined;
+        if (sLobbyP[k] != NULL) {
+            ImU32 tint = lit ? IM_COL32(255, 255, 255, 255) : IM_COL32(20, 25, 40, 200);
+            dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)sLobbyP[k]), ImVec2(cx - pw * 0.5f, floor - ph), ImVec2(cx + pw * 0.5f, floor),
+                         ImVec2(0, 0), ImVec2(1, 1), tint);
+        }
+        const char *label = k == 0 ? "YOU" : joined ? "FRIEND  -  JOINED!" : "Waiting for your friend...";
+        ImVec2 ts = ImGui::CalcTextSize(label);
+        float sc = 1.6f, tx = cx - ts.x * sc * 0.5f, ty = floor + H * 0.02f;
+        dl->AddRectFilled(ImVec2(tx - 14, ty - 6), ImVec2(tx + ts.x * sc + 14, ty + ts.y * sc + 6), IM_COL32(10, 20, 50, 190), 10.0f);
+        dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * sc, ImVec2(tx, ty), lit ? IM_COL32(255, 220, 80, 255) : IM_COL32(200, 210, 230, 255), label);
+    }
+}
+
 static bool bars_on(void) {
     if (sBars < 0) {
         sBars = Port_Setting("side_bars", 0);
@@ -958,10 +1001,20 @@ static void build_net(void) {
         {
             int state = Port_LobbyPoll();
             sNetBusy = state == 1 || state == 3;
-            if (state == 2) {
+            static Uint64 joinedAt; // (both stand in the lobby for a moment, then the match starts)
+            if (state == 2 && joinedAt == 0) {
+                joinedAt = SDL_GetTicks();
+            }
+            if (state == 1 || state == 3 || joinedAt != 0) {
+                lobby_draw(joinedAt != 0 || state == 1);
+            }
+            if (state == 2 && SDL_GetTicks() - joinedAt >= 2500) {
+                joinedAt = 0;
                 Port_LobbyLaunch(); // the other player is there: the game turns into the session at its next blank
                 set_open(false);
                 sNet = false;
+            } else if (state != 2) {
+                joinedAt = 0;
             }
             bool byCode = tab == 0 ? useCode : roomCode[0] != '\0';
             if (state != 0) {
