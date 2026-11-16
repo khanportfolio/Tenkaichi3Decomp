@@ -36,7 +36,8 @@ typedef uint32_t u32;
 #include "../../../include/menu/port_mods.h"
 #include "../../include/plat_charas.h"
 
-extern int Port_NetSession(void);                /* gs/net.c */
+extern int Port_NetSession(void);
+extern int Port_NetModsHidden(void); /* port/src/gs/net.c: online, unless both players have the same mods */                /* gs/net.c */
 extern char *PortTbo_FighterName(s32 chara);     /* src/menu/port_tbo.c */
 extern const char *Port_CharaName(int index);    /* plat_charas.c: an added character's name */
 extern void PortTbo_TextMode(int on);            /* gs_input.c */
@@ -142,7 +143,7 @@ static void ensure(void) {
 
 static int valid(int i) {
     ensure();
-    return i >= 0 && i < sLibCount && !Port_NetSession();
+    return i >= 0 && i < sLibCount && !Port_NetModsHidden();
 }
 
 /* Writes the order of use with folder `at` moved to `to` (0 first; -1 where it is) and switched `on` (-1 as it is),
@@ -258,7 +259,7 @@ s32 Port_ModsChanged(void) {
 
 s32 Port_ModCount(void) {
     ensure();
-    return Port_NetSession() ? 0 : sLibCount;
+    return Port_NetModsHidden() ? 0 : sLibCount;
 }
 
 void Port_ModGetInfo(s32 i, PortModInfo *out) {
@@ -1059,7 +1060,7 @@ s32 Port_ModPortrait(s32 i, void *out, s32 max) {
 s32 Port_SkinCount(void) {
     int list[LIB_MAX];
     ensure();
-    return Port_NetSession() ? 0 : skins(list, LIB_MAX);
+    return Port_NetModsHidden() ? 0 : skins(list, LIB_MAX);
 }
 
 s32 Port_SkinMod(s32 skin) {
@@ -1338,7 +1339,7 @@ void Port_TransGet(s32 who, PortTrans *out) {
     model_path(who, path, sizeof(path));
     trans_of_file(path, out);
     out->set = out->fuseSet = 0;
-    if (Port_NetSession() || (i = pkg_of(who)) < 0) {
+    if (Port_NetModsHidden() || (i = pkg_of(who)) < 0) {
         return;
     }
     folder = sLib[i].folder;

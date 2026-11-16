@@ -1447,6 +1447,7 @@ void TeamSel_Update(void) {
 extern s32 PortModGrid_Pick(s32 padNo, s32 *chara, s32 *code);
 extern s32 Port_SkinCount(void);
 extern int Port_NetSession(void);
+extern int Port_NetModsHidden(void); /* port/src/gs/net.c: online, unless both players have the same mods */
 static s32 sPortGridCross[TEAMSEL_SIDES]; /* (cross for this side on its next frame) */
 static s32 sPortGridCostume[TEAMSEL_SIDES];
 
@@ -1671,7 +1672,7 @@ f32 TeamSel_Input(s32 *result) {
                     sPortGridCross[CUR_N] = 0;
                     gPad[i].gamePressed |= PADG_CROSS;
                     gPad[i].gameRepeat = 0;
-                } else if ((gPad[i].gamePressed & PADG_SQUARE) && !Port_NetSession() && Port_SkinCount() > 0) {
+                } else if ((gPad[i].gamePressed & PADG_SQUARE) && !Port_NetModsHidden() && Port_SkinCount() > 0) {
                     if (TeamSel_PortGrid(i, CUR_N)) {
                         sPortGridCross[CUR_N] = 1;
                         Snd_PlaySe(1, 1);

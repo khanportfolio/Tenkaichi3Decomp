@@ -1298,7 +1298,8 @@ void CharSel_Update(void) {
 extern s32 PortModGrid_Pick(s32 padNo, s32 *chara, s32 *code);
 extern s32 Port_SkinCount(void);
 extern int Port_NetSession(void);
-static s32 sPortGridCross[CHARSEL_SIDES]; /* (cross for this side on its next frame) */
+
+extern int Port_NetModsHidden(void); /* port/src/gs/net.c: online, unless both players have the same mods */static s32 sPortGridCross[CHARSEL_SIDES]; /* (cross for this side on its next frame) */
 static s32 sPortGridCostume[CHARSEL_SIDES];
 
 static s32 CharSel_PortGrid(s32 pad, s32 n) {
@@ -1517,7 +1518,7 @@ void CharSel_Input(s32 *running) {
                 sPortGridCross[CS_N] = 0;
                 gPad[i].gamePressed |= PADG_CROSS;
                 gPad[i].gameRepeat = 0;
-            } else if ((gPad[i].gamePressed & PADG_SQUARE) && !Port_NetSession() && Port_SkinCount() > 0) {
+            } else if ((gPad[i].gamePressed & PADG_SQUARE) && !Port_NetModsHidden() && Port_SkinCount() > 0) {
                 if (CharSel_PortGrid(i, CS_N)) {
                     sPortGridCross[CS_N] = 1;
                     Snd_PlaySe(1, 1);
