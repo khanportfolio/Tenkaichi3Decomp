@@ -1066,6 +1066,15 @@ typedef struct MmPair {
     f32 p1Yaw;
 } MmPair;
 static MmPair sMp;
+/* each side's model and its measure (Mp_Measure) */
+typedef struct MpFit {
+    u8 *obj;     /* the model this is about */
+    s32 frames;  /* frames it has been drawn (measured after the first) */
+    f32 base;    /* its own scale, as it was made */
+    f32 h;       /* its bones' height at scale 1, 0 not measured yet */
+    f32 foot;    /* its lowest bone below its origin, at scale 1 */
+} MpFit;
+static MpFit sMpFit[2];
 extern s32 ChrView_CancelLoad(void);
 extern int Port_ModelSize(void); /* plat_charas.c: the largest model file */
 
@@ -1227,14 +1236,6 @@ void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
    each side is turned to the other, hundredths of a radian: 15 and 45). */
 extern void *BtlObj_GetNode(void *obj, s32 node);
 
-typedef struct MpFit {
-    u8 *obj;     /* the model this is about */
-    s32 frames;  /* frames it has been drawn (measured after the first) */
-    f32 base;    /* its own scale, as it was made */
-    f32 h;       /* its bones' height at scale 1, 0 not measured yet */
-    f32 foot;    /* its lowest bone below its origin, at scale 1 */
-} MpFit;
-static MpFit sMpFit[2];
 
 /* Top and bottom of the bones (the game's y is down) over the scale they were drawn at. */
 static void Mp_Measure(MpFit *f, s32 chara, s32 side) {
