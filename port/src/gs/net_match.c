@@ -33,7 +33,7 @@
 #include <unistd.h>
 #endif
 
-#define MATCH_URL_DEFAULT "https://odd-surf-0af7.bt3decomp.workers.dev"
+#define MATCH_URL_DEFAULT "https://dbz-rooms.kamehouse-arena.workers.dev" /* (this modded copy: its own service, so its players always meet) */
 #include "net_match.h"
 #include "../port_release.h"
 #include "net_relay.h"
