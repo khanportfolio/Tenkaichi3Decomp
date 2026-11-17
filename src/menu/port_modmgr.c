@@ -1,4 +1,5 @@
 #include "common.h"
+#include <stdio.h> /* (the 3D select's measures, BT3_SEL3D_LOG) */
 #include "menu/menu_e.h"
 #include "sys/pad.h"
 #include "sys/save.h"
@@ -1084,6 +1085,7 @@ void Mm_PairOpen(void) {
     sMp.p2Shown = -1;
     sMp.p2Obj = -1;
     sMp.p1Yaw = MM_VIEW_YAW;
+    memset(sMpFit, 0, sizeof(sMpFit));
     sMvShown = -1;
     ChrView_PortInitAsync(); /* (only queues the backdrop's read: Mm_PairUpdate runs it in its turn) */
     sMp.open = 1;
@@ -1216,88 +1218,171 @@ void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
     }
 }
 
+/* Each side's fighter fits the same frame, by its own model only (17 Nov 2026, the user: changing one side changed
+   the other's size, and Turles, Piccolo and Champa stood out of the frame). The camera is fixed (set as the viewer
+   would for Goku, whatever is shown); a model's height is measured from its bones (top to bottom, at the scale it
+   was drawn with) the first frame it is drawn (hidden), then it is sized so that height is the frame's and stood
+   with its lowest bone on the floor line. Settings: sel3d_x / sel3d_feet / sel3d_h as before, sel3d_fill (per
+   thousand of the frame the bones fill, 900; hair and raised arms go past them), sel3d_turn1 / sel3d_turn2 (how far
+   each side is turned to the other, hundredths of a radian: 15 and 45). */
+extern void *BtlObj_GetNode(void *obj, s32 node);
+
+typedef struct MpFit {
+    u8 *obj;     /* the model this is about */
+    s32 frames;  /* frames it has been drawn (measured after the first) */
+    f32 base;    /* its own scale, as it was made */
+    f32 h;       /* its bones' height at scale 1, 0 not measured yet */
+    f32 foot;    /* its lowest bone below its origin, at scale 1 */
+} MpFit;
+static MpFit sMpFit[2];
+
+/* Top and bottom of the bones (the game's y is down) over the scale they were drawn at. */
+static void Mp_Measure(MpFit *f, s32 chara, s32 side) {
+    f32 *m = (f32 *)(f->obj + 0x9A0);
+    f32 sc = m[5];
+    f32 top = 1.0e9f;
+    f32 low = -1.0e9f;
+    f32 y0 = *(f32 *)(f->obj + 0x954);
+    s32 n = 0;
+    s32 i;
+
+    for (i = 0; i < 0xA9; i++) {
+        u8 *node = (u8 *)BtlObj_GetNode(f->obj, i);
+        f32 y;
+
+        if (node == NULL) {
+            continue;
+        }
+        y = *(f32 *)(node + 0x44);
+        if (y < top) {
+            top = y;
+        }
+        if (y > low) {
+            low = y;
+        }
+        n++;
+    }
+    if (n < 2 || sc < 1.0e-6f || low - top < 1.0e-4f) {
+        f->h = -1.0f; /* (no bones to go by: the viewer's own size) */
+        return;
+    }
+    f->h = (low - top) / sc;
+    f->foot = (low - y0) / sc;
+    if (getenv("BT3_SEL3D_LOG") != NULL) {
+        fprintf(stderr, "bt3: sel3d: side %d chara %d bones %d height %.3f foot %.3f base %.4f\n", (int)side, (int)chara, (int)n,
+                (double)f->h, (double)f->foot, (double)f->base);
+    }
+}
+
+/* Places model `o` of side k (its feet at x across the screen), sized and stood by its measure; hidden when not
+   `show` or not measured yet. */
+static void Mp_Place(u8 *o, s32 k, f32 x, f32 feetY, f32 fy, f32 dist, f32 want, f32 yaw, s32 show) {
+    MpFit *f = &sMpFit[k];
+    f32 *m = (f32 *)(o + 0x9A0);
+    f32 narrow = 1333.0f / (f32)Port_PageAspectMilli();
+    f32 s;
+    f32 ox;
+    f32 oy;
+    f32 c;
+    f32 sn;
+
+    if (f->obj != o) {
+        f->obj = o;
+        f->frames = 0;
+        f->h = 0.0f;
+        f->foot = 0.0f;
+        f->base = sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    }
+    s = f->base;
+    if (f->h > 0.0f) {
+        s = want / f->h;
+    }
+    ox = -(Mx_ScreenFracX(x) - 0.492f) / 0.76f * dist;
+    oy = (feetY - fy) / 1.115f * dist - f->foot * s;
+    if (!show || f->h == 0.0f) {
+        oy = -10000.0f;
+    }
+    c = cosf(yaw);
+    sn = sinf(yaw);
+    *(f32 *)(o + 0x964) = yaw;
+    *(f32 *)(o + 0x950) = ox;
+    *(f32 *)(o + 0x954) = oy;
+    m[0] = c * s * narrow;
+    m[1] = 0.0f;
+    m[2] = -sn * s;
+    m[4] = 0.0f;
+    m[5] = s;
+    m[6] = 0.0f;
+    m[8] = sn * s * narrow;
+    m[9] = 0.0f;
+    m[10] = c * s;
+    m[12] = ox;
+    m[13] = oy;
+}
+
 /* Draws the two (before the select's movies, so its plates and chips are over them); says which side has its model
    standing (its portrait is then not drawn). */
 void Mm_PairDraw(s32 *ready0, s32 *ready1) {
-    MmCharaInfo *ci;
+    MmCharaInfo *ref;
     u8 *obj;
     u8 *o2;
     f32 place[3];
     f32 dist;
     f32 fy;
     f32 hf;
+    f32 want;
+    f32 feetY;
+    f32 yaw0;
+    f32 yaw1;
     s32 p1ok;
     s32 p2ok;
+    s32 k;
 
     *ready0 = 0;
     *ready1 = 0;
     if (!sMp.open || !sMp.ready || !ChrView_IsVisible() || gChrView->cur == NULL) {
         return;
     }
-    ci = ChrView_GetCharaInfo((u32)sMvChara);
-    if (ci == NULL) {
+    ref = ChrView_GetCharaInfo(0); /* (the camera as the viewer sets it for Goku: the same whoever stands there) */
+    if (ref == NULL) {
         return;
     }
     Mx_Begin();
-    obj = BtlObj_Get(gChrView->cur->obj);
-    if (obj != sMp.p1Obj) {
-        sMp.p1Obj = obj;
-        sMp.p1Y = 0.0f;
-        if (obj != NULL) {
-            sMp.p1Y = *(f32 *)(obj + 0x954);
-        }
-    }
-    p1ok = obj != NULL && !ChrView_IsLoading() && sMp.want[0] >= 0 && sMvShown == sMp.want[0];
     place[0] = (f32)Mp_Setting("sel3d_x", 330);
     place[1] = (f32)Mp_Setting("sel3d_feet", 640);
     place[2] = (f32)Mp_Setting("sel3d_h", 470);
-    Mm_PlaceModel(ci, obj, place, &sMp.p1Yaw, 0, &dist, &fy, &hf);
-    if (obj != NULL) { /* (a model of another fighter, still there while the next is read: out of sight) */
-        f32 y = p1ok ? sMp.p1Y : -10000.0f;
-
-        *(f32 *)(obj + 0x954) = y;
-        ((f32 *)(obj + 0x9A0))[13] = y;
+    Mm_PlaceModel(ref, NULL, place, &sMp.p1Yaw, 0, &dist, &fy, &hf);
+    /* the world height a fighter is given: what the viewer gives Goku at this camera, the bones a part of it */
+    want = ref->dist * 0.647f / 1.115f * (f32)Mp_Setting("sel3d_fill", 900) / 1000.0f;
+    feetY = Mx_ScreenFracY(place[1]) + Mx_SizeFracY(24.0f);
+    yaw0 = 3.1415927f + (f32)Mp_Setting("sel3d_turn1", 15) / 100.0f;
+    yaw1 = 3.1415927f - (f32)Mp_Setting("sel3d_turn2", 45) / 100.0f;
+    obj = BtlObj_Get(gChrView->cur->obj);
+    p1ok = obj != NULL && !ChrView_IsLoading() && sMp.want[0] >= 0 && sMvShown == sMp.want[0];
+    if (obj != NULL) {
+        Mp_Place(obj, 0, place[0], feetY, fy, dist, want, yaw0, p1ok);
     }
     o2 = NULL;
     if (sMp.p2Obj >= 0) {
         o2 = BtlObj_Get(sMp.p2Obj);
     }
     p2ok = o2 != NULL && !sMp.p2Reading && sMp.p2Shown == sMp.want[1];
-    if (o2 != NULL) { /* player 2: as the extras are placed, the other way round */
-        f32 *m = (f32 *)(o2 + 0x9A0);
-        f32 narrow = 1333.0f / (f32)Port_PageAspectMilli();
-        f32 s = sMp.p2Base * Mx_SizeFracY(place[2]) / (hf > 0.01f ? hf : 0.01f);
-        f32 ox = -(Mx_ScreenFracX(MX_W - place[0]) - 0.492f) / 0.76f * dist;
-        f32 oy = (Mx_ScreenFracY(place[1]) + Mx_SizeFracY(24.0f) - fy) / 1.115f * dist;
-        f32 yaw = 6.2831853f - MM_VIEW_YAW;
-        f32 c = cosf(yaw);
-        f32 sn = sinf(yaw);
-
-        if (!p2ok) {
-            oy = -10000.0f;
-        }
-        *(f32 *)(o2 + 0x964) = yaw;
-        *(f32 *)(o2 + 0x950) = ox;
-        *(f32 *)(o2 + 0x954) = oy;
-        m[0] = c * s * narrow;
-        m[1] = 0.0f;
-        m[2] = -sn * s;
-        m[4] = 0.0f;
-        m[5] = s;
-        m[6] = 0.0f;
-        m[8] = sn * s * narrow;
-        m[9] = 0.0f;
-        m[10] = c * s;
-        m[12] = ox;
-        m[13] = oy;
-    }
-    if (!p1ok && !p2ok) {
-        return;
+    if (o2 != NULL) {
+        Mp_Place(o2, 1, MX_W - place[0], feetY, fy, dist, want, yaw1, p2ok);
     }
     Mm_Scene();
     Mm_TexReset();
-    *ready0 = p1ok;
-    *ready1 = p2ok;
+    /* measured after the frame they were first drawn in (their bones placed by the scene) */
+    for (k = 0; k < 2; k++) {
+        MpFit *f = &sMpFit[k];
+        u8 *o = k == 0 ? obj : o2;
+
+        if (o != NULL && f->obj == o && f->h == 0.0f && ++f->frames >= 2) {
+            Mp_Measure(f, k == 0 ? sMvShown / 4 : sMp.p2Shown / 4, k);
+        }
+    }
+    *ready0 = p1ok && sMpFit[0].obj == obj && sMpFit[0].h != 0.0f;
+    *ready1 = p2ok && sMpFit[1].obj == o2 && sMpFit[1].h != 0.0f;
 }
 
 /* ---- the screen ----

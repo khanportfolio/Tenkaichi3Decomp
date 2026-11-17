@@ -921,6 +921,27 @@ static void CharSel_Port3D(void) {
             want[i] = c * 4 + (s->state == CHARSEL_ST_COLOR || s->state == CHARSEL_ST_DONE ? (s->colorPlate & 3) : 0);
         }
     }
+    { /* (tests, BT3_SEL3D_CYCLE=<frames>: every fighter in turn on both sides, whatever the cursors say) */
+        static s32 sCycleFrame;
+        const char *e = getenv("BT3_SEL3D_CYCLE");
+
+        if (e != NULL && atoi(e) > 0) {
+            s32 n = 161 + PORT_CHARA_MAX;
+            s32 step = sCycleFrame++ / atoi(e);
+
+            for (i = 0; i < 2; i++) {
+                s32 c = (step * 2 + i) % n;
+
+                if (c >= 161) {
+                    c = PORT_CHARA_FIRST + (c - 161);
+                    if (Port_CharaBase(c) == c) { /* (no fighter added under this id) */
+                        c = i;
+                    }
+                }
+                want[i] = c * 4;
+            }
+        }
+    }
     Mm_PairUpdate(want[0], want[1], gCharSel->faceState == CHARSEL_LOAD_IDLE && gCharSel->stageState == CHARSEL_LOAD_IDLE &&
                                         !(gCharSel->side[0]->flags & CHARSEL_SIDE_FACE_CHANGE) &&
                                         !(gCharSel->side[1]->flags & CHARSEL_SIDE_FACE_CHANGE));
