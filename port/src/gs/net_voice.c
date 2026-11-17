@@ -147,6 +147,20 @@ int PortVoice_Outgoing(uint8_t *out) {
         sWantClose = 0;
         close_all();
     }
+    if (getenv("BT3_VOICE_TEST") != NULL) { /* (tests: a tone instead of the microphone, 20 ms every 20 ms) */
+        static uint64_t next;
+        static unsigned phase;
+        uint64_t now = SDL_GetTicks();
+        if (now < next) {
+            return 0;
+        }
+        next = (next == 0 || now - next > 100 ? now : next) + 20;
+        for (i = 0; i < VOICE_FRAME; i++, phase++) {
+            out[i] = lin2ulaw((int16_t)((phase / 9) % 2 ? 6000 : -6000)); /* (about 440 Hz) */
+        }
+        sSpokeMs = now;
+        return VOICE_FRAME;
+    }
     if (PortVoice_Mode() == VOICE_OFF) {
         if (sIn != NULL) {
             SDL_DestroyAudioStream(sIn);
@@ -212,6 +226,7 @@ void PortVoice_HeardFrom(uint32_t who, const uint8_t *in, int n) {
         }
         sOut[k].s = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
         sOut[k].who = who;
+        SDL_Log("bt3: voice: hearing %08x (%s)", (unsigned)who, sOut[k].s != NULL ? "played" : "no speaker");
         if (sOut[k].s == NULL) {
             return;
         }

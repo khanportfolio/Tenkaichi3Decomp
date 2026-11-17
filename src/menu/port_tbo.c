@@ -429,7 +429,7 @@ static char *Tb_Fmt(char *format) {
 }
 
 static char *sTbHubName[HUB_COUNT] = {"Quick Match", "Ranked Match", "Lobby", "Join", "Friends", "Tournament", "Replays", "Leaderboard", "Profile"};
-static const s32 sTbHubReady[HUB_COUNT] = {1, 1, 1, 1, 1, 1, 0, 1, 1}; /* (this modded copy: Friends, Tournament, Leaderboard) */
+static const s32 sTbHubReady[HUB_COUNT] = {1, 1, 1, 1, 1, 1, 1, 1, 1}; /* (this modded copy: every item) */ /* (this modded copy: Friends, Tournament, Leaderboard) */
 static char *sTbHubSay[HUB_COUNT] = {
     "Fight whoever is searching right now! No time limit, and you can train while you wait.",
     "Fights that move your rank, season by season. That one is coming soon!",
@@ -1013,6 +1013,10 @@ static void Tb_HubUpdate(s32 live) {
             Tb_Note(sTb->hubCur == HUB_FRIENDS ? "FRIENDS: THE WINDOW IS OPEN (USE THE MOUSE)" : "LEADERBOARD: THE WINDOW IS OPEN (USE THE MOUSE)");
             break;
         }
+        case HUB_REPLAYS: /* (this modded copy) the game's own replays: saved after a battle, watched in the Data Center */
+            Snd_PlaySe(1, 1);
+            Tb_Note("REPLAYS: AFTER A BATTLE CHOOSE SAVE REPLAY, THEN WATCH IT IN DATA CENTER, REPLAY");
+            break;
         case HUB_RANKED: /* (this modded copy) */
             Snd_PlaySe(1, 1);
             Tb_RankedStart();
