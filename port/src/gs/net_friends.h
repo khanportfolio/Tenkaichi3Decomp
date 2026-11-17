@@ -40,6 +40,7 @@ void PortFriends_Invite(const char *code);    /* to this player's lobby (its roo
 void PortFriends_Board(int friendsOnly);
 void PortFriends_Result(const char *match, const char *otherCode, int won); /* a ranked match's result */
 void PortFriends_Refresh(void);               /* presence at once */
+const char *PortFriends_MyCode(void);        /* this player's friend code, NULL not known yet */
 /* The window (ui.cpp): shown from the Online menu's Friends / Leaderboard (tab 0 friends, 1 recent, 2 requests,
    3 leaderboard). */
 void PortFriends_Show(int tab);

@@ -234,6 +234,16 @@ static void take_answer(const char *what, char *ans) {
                             : strcmp(w, "notfriend") == 0 ? "Only friends can be invited."
                             : strcmp(w, "busy") == 0 ? "The service is busy: try again in a while."
                             : NULL;
+            if (say == NULL && (w[0] == '+' || w[0] == '-')) {
+                SDL_snprintf(v.note, sizeof(v.note), "Ranked: rating %s", w);
+                v.noteSeq++;
+            } else if (say == NULL && strcmp(w, "waiting") == 0) {
+                SDL_strlcpy(v.note, "Ranked: result sent (the rating moves when the other game's comes)", sizeof(v.note));
+                v.noteSeq++;
+            } else if (say == NULL && strcmp(w, "disagree") == 0) {
+                SDL_strlcpy(v.note, "Ranked: the two games disagreed: not counted", sizeof(v.note));
+                v.noteSeq++;
+            }
             if (say != NULL) {
                 SDL_strlcpy(v.note, say, sizeof(v.note));
                 v.noteSeq++;
@@ -343,6 +353,18 @@ void PortFriends_View(PortFriendsView *out) {
     SDL_LockSpinlock(&sLock);
     *out = sV;
     SDL_UnlockSpinlock(&sLock);
+}
+
+int PortFriends_Known(void) {
+    return PortFriends_MyCode() != NULL;
+}
+
+const char *PortFriends_MyCode(void) {
+    static char code[FR_CODE];
+    SDL_LockSpinlock(&sLock);
+    SDL_strlcpy(code, sV.myCode, sizeof(code));
+    SDL_UnlockSpinlock(&sLock);
+    return code[0] != '\0' ? code : NULL;
 }
 
 void PortFriends_Refresh(void) {

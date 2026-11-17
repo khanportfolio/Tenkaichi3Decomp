@@ -429,7 +429,7 @@ static char *Tb_Fmt(char *format) {
 }
 
 static char *sTbHubName[HUB_COUNT] = {"Quick Match", "Ranked Match", "Lobby", "Join", "Friends", "Tournament", "Replays", "Leaderboard", "Profile"};
-static const s32 sTbHubReady[HUB_COUNT] = {1, 0, 1, 1, 1, 1, 0, 1, 1}; /* (this modded copy: Friends, Tournament, Leaderboard) */
+static const s32 sTbHubReady[HUB_COUNT] = {1, 1, 1, 1, 1, 1, 0, 1, 1}; /* (this modded copy: Friends, Tournament, Leaderboard) */
 static char *sTbHubSay[HUB_COUNT] = {
     "Fight whoever is searching right now! No time limit, and you can train while you wait.",
     "Fights that move your rank, season by season. That one is coming soon!",
@@ -856,6 +856,38 @@ static void Tb_SparUpdate(s32 live) {
     }
 }
 
+/* (this modded copy, 17 Nov 2026) Ranked Match: a quick match, one on one, in the service's queue R (the last);
+   both games report the first battle's result and the friends service moves the two ratings. */
+static void Tb_RankedStart(void) {
+    extern int PortFriends_Known(void);
+    s32 state;
+
+    if (!Tb_Vanilla(1)) {
+        return;
+    }
+    if (!PortFriends_Known()) {
+        Tb_Note("RANKED NEEDS YOUR FRIEND CODE FROM THE SERVICE: TRY AGAIN IN A MOMENT");
+        return;
+    }
+    Port_NetSpeedSet(Port_NetSpeedStandard());
+    Port_NetRulesSet(0, 0, 4); /* (a single battle, no time limit, the standard speed) */
+    Port_NetOptions(Port_RollCan() ? 8 : 0, -2);
+    Port_NetNameSet(Port_NetNameGet());
+    Port_LobbyQuickArea("auto");
+    state = Port_LobbyStartQuick(5); /* (the queue R: net_match.c, kMatchQueues) */
+    if (state < 0) {
+        Tb_Note("THE NETWORK COULD NOT BE OPENED ON THIS PC");
+        return;
+    }
+    sTb->queue = 0;
+    sTb->host = 2;
+    sTb->waitFrom = sTb->frames;
+    sTb->found = 0;
+    sTb->waitBack = TB_HUB;
+    Tb_SetMode(TB_WAIT);
+    Tb_Note("RANKED MATCH: A RIVAL IS BEING SEARCHED FOR");
+}
+
 /* ---------------------------------------------------------------------------------------------- Quick Match */
 static void Tb_QuickStart(void) {
     s32 state;
@@ -981,6 +1013,10 @@ static void Tb_HubUpdate(s32 live) {
             Tb_Note(sTb->hubCur == HUB_FRIENDS ? "FRIENDS: THE WINDOW IS OPEN (USE THE MOUSE)" : "LEADERBOARD: THE WINDOW IS OPEN (USE THE MOUSE)");
             break;
         }
+        case HUB_RANKED: /* (this modded copy) */
+            Snd_PlaySe(1, 1);
+            Tb_RankedStart();
+            break;
         case HUB_TOURNAMENT: /* (this modded copy) a lobby, then its Mode rule: Tournament */
             Snd_PlaySe(1, 1);
             sTb->crCur = CR_OPEN;

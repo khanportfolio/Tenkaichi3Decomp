@@ -564,6 +564,55 @@ extern int Port_Setting(const char *name, int def); /* plat_settings.c */
 static unsigned long long mods_offer(void) {
     return Port_Setting("net_mods", 0) ? mods_mine() : 0;
 }
+/* (this modded copy, 17 Nov 2026) Ranked Match: a quick match in the queue R. Each greeting carries the player's
+   friend code (the friends service's, net_friends.c) after the mods' mark; when the first battle ends each game
+   reports its result to the service, which moves the two ratings once both said the same. */
+extern const char *PortFriends_MyCode(void);
+extern void PortFriends_Result(const char *match, const char *otherCode, int won);
+static int sRanked, sRankSent, sRankSaw;
+static char sTheirCode[12];
+static void code_put(uint32_t *at) {
+    char c[12] = {0};
+    const char *mine = PortFriends_MyCode();
+    if (mine != NULL) {
+        snprintf(c, sizeof(c), "%s", mine);
+    }
+    memcpy(at, c, 12);
+}
+static void code_take(const uint8_t *at) {
+    memcpy(sTheirCode, at, 12);
+    sTheirCode[11] = '\0';
+    if (strncmp(sTheirCode, "DBZ-", 4) != 0) {
+        sTheirCode[0] = '\0';
+    }
+}
+static void ranked_watch(void) {
+    extern int Port_BattleOutcome(int *winner); /* headless.c */
+    int bits = 0, state, me = sMe;
+    char match[24];
+    if (!sRanked || sRankSent || !sConnected || sTheirCode[0] == '\0') {
+        return;
+    }
+    state = Port_BattleOutcome(&bits);
+    if (state == 3) {
+        sRankSaw = 1;
+        return;
+    }
+    if (!sRankSaw || state < 4 || state > 6 || (bits & 3) == 0 || (bits & 3) == 3) {
+        return;
+    }
+    sRankSent = 1;
+    snprintf(match, sizeof(match), "R%08x", (unsigned)sSeed);
+    PortFriends_Result(match, sTheirCode, (bits & 3) == (me == 0 ? 1 : 2));
+    fprintf(stderr, "bt3: net: ranked: the battle ended, %s (against %s): sent\n", (bits & 3) == (me == 0 ? 1 : 2) ? "won" : "lost", sTheirCode);
+}
+void Port_NetRankedSet(int on) {
+    sRanked = on != 0;
+}
+int Port_NetRanked(void) {
+    return sRanked;
+}
+
 static void mods_take(const uint8_t *at) { /* {MOD_MARK, low, high} of the other side */
     uint32_t v[3];
     unsigned long long theirs;
@@ -1721,6 +1770,7 @@ static int receive(void) {
     if (sMode != 3) {
         chat_send();
         voice_send(); /* (the two players only, not a spectator) */
+        ranked_watch();
     }
     while ((n = net_recv(pkt, (int)sizeof(pkt), &from)) >= 8) {
         uint32_t magic, type;
@@ -1811,16 +1861,20 @@ static int receive(void) {
             uint32_t ack[3] = {MAGIC, T_HELLO_ACK, NET_VERSION};
             net_send(ack, sizeof(ack), &from);
         } else if (type == T_HELLO && sMode == 1) {
-            uint32_t ack[11 + NAME_LEN / 4] = {MAGIC, T_HELLO_ACK, (uint32_t)sDelay, (uint32_t)sRollMax, NET_VERSION, sRules};
+            uint32_t ack[14 + NAME_LEN / 4] = {MAGIC, T_HELLO_ACK, (uint32_t)sDelay, (uint32_t)sRollMax, NET_VERSION, sRules};
             unsigned long long mm = mods_offer();
             ack[7 + NAME_LEN / 4] = sSeed;
             ack[8 + NAME_LEN / 4] = MOD_MARK;
             ack[9 + NAME_LEN / 4] = (uint32_t)mm;
             ack[10 + NAME_LEN / 4] = (uint32_t)(mm >> 32);
+            code_put(&ack[11 + NAME_LEN / 4]);
             if (!sConnected) {
                 sModsShared = 0;
                 if (n >= 32 + NAME_LEN) {
                     mods_take(pkt + 20 + NAME_LEN);
+                }
+                if (n >= 44 + NAME_LEN) {
+                    code_take(pkt + 32 + NAME_LEN);
                 }
             }
             memcpy(&ack[6], sMyName, NAME_LEN);
@@ -1879,6 +1933,9 @@ static int receive(void) {
                 sModsShared = 0;
                 if (n >= 44 + NAME_LEN) {
                     mods_take(pkt + 32 + NAME_LEN);
+                }
+                if (n >= 56 + NAME_LEN) {
+                    code_take(pkt + 44 + NAME_LEN);
                 }
                 memcpy(sNames[1], sMyName, NAME_LEN);
                 sCfgGot = 1;
@@ -2104,6 +2161,9 @@ static void net_start(int role, const char *host, const char *join) {
     sVersionBad = 0;
     sDataBad = 0;
     sModsShared = 0;
+    sTheirCode[0] = '\0';
+    sRankSent = 0;
+    sRankSaw = 0;
     mods_mine(); /* (worked out once, before any greeting) */
     sFpHeard = 0;
     sEchoTs = 0;
@@ -2245,7 +2305,7 @@ static void net_start(int role, const char *host, const char *join) {
             continue;
         }
         if (sMode == 2 && now - last > 100000000ull) {
-            uint32_t hello[8 + NAME_LEN / 4] = {MAGIC, T_HELLO, NET_VERSION};
+            uint32_t hello[11 + NAME_LEN / 4] = {MAGIC, T_HELLO, NET_VERSION};
             unsigned long long mm = mods_offer();
             memcpy(&hello[3], sMyName, NAME_LEN);
             hello[3 + NAME_LEN / 4] = sOpts[1];
@@ -2253,6 +2313,7 @@ static void net_start(int role, const char *host, const char *join) {
             hello[5 + NAME_LEN / 4] = MOD_MARK;
             hello[6 + NAME_LEN / 4] = (uint32_t)mm;
             hello[7 + NAME_LEN / 4] = (uint32_t)(mm >> 32);
+            code_put(&hello[8 + NAME_LEN / 4]);
             fprint_send(&sPeer);
             net_send(hello, sizeof(hello), &sPeer);
             if (sJoinAlt.sin_port != 0) {
@@ -3676,6 +3737,9 @@ int Port_LobbyStartCode(int host, const char *code) {
     if (sQuickQueue < 0 && !sWatchByCode && lobby_hold(PEND_CODE, host, code, 0)) {
         return sLobby;
     }
+    if (sQuickQueue < 0) {
+        sRanked = 0; /* (this modded copy: a room or a lobby by code is never ranked) */
+    }
     Port_LobbyStart(1, "", 0); /* a socket on a port of the system's choosing */
     if (sLobby < 0) {
         return sLobby;
@@ -3726,6 +3790,7 @@ int Port_LobbyStartQuick(int queue) {
     sQuickQueue = queue;
     Port_LobbyStartCode(1, "");
     sQuickQueue = -1;
+    sRanked = queue == MATCH_QUEUES - 1; /* (this modded copy: the queue R) */
     return sLobby;
 }
 

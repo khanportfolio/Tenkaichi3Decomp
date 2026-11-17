@@ -23,7 +23,7 @@ typedef struct MatchStatus {
     int widen;                      /* a quick match that waits, Auto: after this many seconds it looks everywhere (0: not said) */
 } MatchStatus;
 
-#define MATCH_QUEUES 5
+#define MATCH_QUEUES 6 /* (this modded copy: + R, Ranked Match: one on one, the ratings of the friends service) */
 extern const char *const kMatchQueues[MATCH_QUEUES]; /* "S", "T", "D10", "D15", "D20" */
 
 /* role 1 makes a room, 2 joins room `code`, 3 is a quick match in the queue named by `code`, 4 watches the match of

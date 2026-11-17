@@ -3071,6 +3071,15 @@ static void friends_draw(void) {
             joining[0] = '\0';
         }
     }
+    if (!show && SDL_GetTicks() < noteUntil && strncmp(note, "Ranked", 6) == 0) { // (a ranked result, from anywhere)
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, 44), ImGuiCond_Always, ImVec2(0.5f, 0));
+        ImGui::SetNextWindowBgAlpha(0.8f);
+        if (ImGui::Begin("##ranked", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                               ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoInputs)) {
+            ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "%s", note);
+        }
+        ImGui::End();
+    }
     if (!show) {
         return;
     }

@@ -995,7 +995,7 @@ void Match_Begin(int role, int sock, int localPort, const char *code, const char
 /* ---- how many wait in each quick-match queue (for the window): asked in a thread of its own, now and then ---- */
 static SDL_AtomicInt sQueueCount[MATCH_QUEUES], sQueueBusy;
 static int sQueueVersion;
-const char *const kMatchQueues[MATCH_QUEUES] = {"S", "T", "D10", "D15", "D20"};
+const char *const kMatchQueues[MATCH_QUEUES] = {"S", "T", "D10", "D15", "D20", "R"};
 
 static int SDLCALL queues_thread(void *arg) {
     char body[64], answer[512];
