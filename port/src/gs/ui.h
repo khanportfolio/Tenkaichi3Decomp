@@ -10,7 +10,8 @@ typedef struct PortVideo {
     int scale;       /* internal resolution multiplier, 1..8 */
     int aspectMilli; /* width / height of the picture * 1000 */
     int fullscreen;
-    int fxOff;       /* bits: 1 outline, 2 see-through tint, 4 depth tint, 8 glare and glow, 16 distance blur, 32 movement blur */
+    int fxOff;       /* bits: 1 outline, 2 see-through tint, 4 depth tint, 8 glare and glow, 16 distance blur, 32 movement blur, 64 weather,
+                        128 weather light (half of it) */
     int glow;        /* percent: the glow of characters and objects */
     int glare;       /* percent: the sky's glare */
     int sharpBlur;   /* 1 = the stage's blur sampled at the internal resolution (crisper than the PS2) */
@@ -26,6 +27,13 @@ typedef struct PortVideo {
     int textFont;    /* separate font for dialogue and other shared Font_Print text */
     int smooth2d;    /* "2D filtering": 0 sharp (a PS2 pixel is a block), 1 smooth (sampled per output pixel) */
 } PortVideo;
+
+/* ui_a11y.cpp: the screen reader in ui.cpp's windows (the settings window, Dragon Net Battle) */
+void UiA11y_Frame(int windowOpen, int sayClosed); /* each frame, before the windows: on while one is open */
+void UiA11y_End(void);                            /* after them: says what the focus is on, or what changed of it */
+void UiA11y_Radio(int selected);                  /* after ImGui::RadioButton: whether it is the one chosen */
+void UiA11y_Field(const char *name, const char *text); /* after ImGui::InputText: its name (when its label is hidden) and text */
+void UiA11y_QueueNext(void);                      /* the next item said waits for what is being said (a page that came up) */
 
 /* gs_draw.c */
 void GsGpu_GetSettings(PortVideo *v);

@@ -24,6 +24,11 @@ extern volatile int gUiNameIdx, gUiNameReady;
 extern volatile int gUiSongX, gUiSongY, gUiSongW, gUiSongH;
 extern volatile int gUiSongIdx, gUiSongReady, gUiSongLit;
 #endif
+#ifdef PORT
+extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
+extern void Port_MenuFill(int on);
+extern void Port_MenuMovie(int index);
+#endif
 
 /*
  * CharSel, 0x342190..0x348D78: the character / stage / music select of the versus modes (progress modes 38..41
@@ -898,8 +903,20 @@ void CharSel_Draw(void) {
                 gCharSel->bgAlpha[1] = 0x80;
             }
         }
+#ifdef PORT
+        if (i == 0) {
+            Port_MenuPage(3); /* widescreen menus: this screen's page (port/src/gs_marker.c), the stage pictures filling the width */
+        }
+        Port_MenuFill(1);
         Sprite_DrawPicture(gCharSel->bg[i], 0, 0, gCharSel->bgAlpha[i]);
+        Port_MenuFill(0);
+#else
+        Sprite_DrawPicture(gCharSel->bg[i], 0, 0, gCharSel->bgAlpha[i]);
+#endif
     }
+#ifdef PORT
+    Port_MenuPage(3); /* (also when the first picture was left out above) */
+#endif
 
     f = &gCharSel->flash[0];
     for (i = 0; i < CHARSEL_SIDES; i++) {
@@ -1234,14 +1251,26 @@ void CharSel_Draw(void) {
         }
     }
 
+#ifdef PORT
+    for (i = 0; i < CHARSEL_FLASH_NUM; i++) {
+        Port_MenuMovie(i == 1 || i == 2 ? i | 0x100 : i); /* widescreen menus: which of the screen's movies, the two
+                                                             rosters marked (port/src/gs_marker.c) */
+        Flash_Draw(&gCharSel->flash[i]);
+    }
+    Port_MenuMovie(0);
+#else
     for (i = 0; i < CHARSEL_FLASH_NUM; i++) {
         Flash_Draw(&gCharSel->flash[i]);
     }
+#endif
     Font_FlushAll();
     IconWin_Draw();
     ItemPanel_Draw(0);
     ItemPanel_Draw(1);
     ItemHelp_Draw(gCharSel->itemInfo);
+#ifdef PORT
+    Port_MenuPage(0);
+#endif
 }
 
 /* Advances the movies and the two side panels, and drops the "hidden" marks once the movies say so. */
@@ -1334,6 +1363,21 @@ static s32 CharSel_PortGrid(s32 pad, s32 n) {
         }
     }
     return 0; /* (no cell has it: not on this screen) */
+}
+
+/* A lobby's match (port/src/gs/net_lobby.c): going back from the character select is its owner's way back to the
+   lobby (the session ends for everyone, as "Back to the Lobby" in a fight); the other player's triangle does
+   nothing there. The owner's side travels with the rules, so every copy decides the same. */
+static s32 CharSel_PortLobbyHold(s32 pad) {
+    extern int Port_NetSession(void);
+    extern int Port_NetLobbyOwnerSide(void);
+    s32 owner;
+
+    if (!Port_NetSession()) {
+        return 0;
+    }
+    owner = Port_NetLobbyOwnerSide();
+    return owner >= 0 && pad != owner;
 }
 #endif
 
@@ -1651,6 +1695,12 @@ void CharSel_Input(s32 *running) {
                         }
                     }
                 } else {
+#ifdef PORT
+                    if (CharSel_PortLobbyHold(i)) { /* a lobby's match: only its owner leaves the select */
+                        Snd_PlaySe(1, 2);
+                        break;
+                    }
+#endif
                     ColorFade_StartOut(0, 0, 0, 20);
                     *running = 0;
                 }

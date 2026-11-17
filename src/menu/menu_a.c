@@ -8,6 +8,10 @@ extern void Port_NetLeave(void);
 #endif
 #include "sys/pad.h"
 #include "sys/save.h"
+#ifdef PORT
+extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
+extern void Port_MenuFill(int on);
+#endif
 
 /* The screen's work (overlay .data, 0x3B0E80). */
 MainMenu *gMainMenu = NULL;
@@ -256,8 +260,9 @@ void MainMenu_Init(s32 section) {
 #ifdef PORT
         /* Item 4, "Dragon Net Battle", is the one entry the PS2 game never lists: it has its plate, label, icon and
            the guides' voiced lines on the disc, and no mode behind it (the Wii version's online mode). The port
-           lists it: it is the way into online play. BT3_MENU_ITEM4=0 hides it again (the pad recordings made
-           before it was listed count on the old menu). */
+           lists it only when the player asks for it (F1 > Online > Advanced: Port_NetMenuListed, port/src/headless.c):
+           Tenkaichi Budokai Online, listed after Duel then, is the way into online play. BT3_MENU_ITEM4=1 lists it
+           whatever the setting (tests: the pad recordings made while it was always listed count on that menu). */
         if (i == 4 && !Port_NetMenuListed()) {
             continue;
         }
@@ -350,7 +355,14 @@ void MainMenu_Draw(void) {
     s32 item;
     MFlash *flash;
 
+#ifdef PORT
+    Port_MenuPage(2); /* widescreen menus: this screen's page (PORT_MENU_SCREEN in port/src/gs_marker.c), its backdrop filling the width */
+    Port_MenuFill(1);
     Sprite_DrawPicture(gMainMenu->bg, 0, 0, 0x80);
+    Port_MenuFill(0);
+#else
+    Sprite_DrawPicture(gMainMenu->bg, 0, 0, 0x80);
+#endif
     flash = &gMainMenu->flash[0];
     for (i = 0; i < 4; i++) {
         switch (i) {
@@ -483,6 +495,9 @@ void MainMenu_Draw(void) {
     }
     IconWin_Draw();
     MsgWin_Draw(0, 0, gMainMenu->voiceLine);
+#ifdef PORT
+    Port_MenuPage(0);
+#endif
 }
 
 /* Sends the plate under the cursor of movie `idx` to a label. */
@@ -538,6 +553,18 @@ void MainMenu_Input(s32 *result) {
     if (!(gMainMenu->flash[0].flags & MFLASH_PAD)) {
         return;
     }
+#ifdef PORT
+    {   /* In a lobby (joined from the Dragon Net Battle window, or back here after its match): its screen, in
+           Tenkaichi Budokai Online (menu/port_tbo.c; port/src/gs/net_lobby.c) */
+        extern int Port_LobbyWantsScreen(void);
+
+        if (!(gMainMenu->flags & MAINMENU_LEAVING) && Port_LobbyWantsScreen()) {
+            gPortScreen = PORT_SCREEN_TBO;
+            MAINMENU_CHOOSE(MPROG_MODE_PORT_SCREEN);
+            return;
+        }
+    }
+#endif
     if (!(gMainMenu->flags & MAINMENU_STARTED)) {
         MainMenu_PlateGoto(0, "fl_on_start");
         if ((gSaveData->unlockFlags & 0x7F) == 0x7F) {

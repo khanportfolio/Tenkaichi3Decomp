@@ -36,6 +36,7 @@
 #include <windows.h>
 #endif
 #include "menu_labels.h"
+#include "../../../include/menu/tbo_art.h"
 
 /* namefont.c again, as this file's own: the functions the game calls get other names, the variables are static. */
 #define Port_NameFontSheets MenuLabels_NameSheets_
@@ -294,7 +295,7 @@ typedef struct MlGroup { /* the labels of one texture (or, for the name strips, 
 
 typedef struct MlRow { /* one label: a row of labels.tsv, an entry of labels.json */
     char id[64], textFrom[64];
-    uint64_t hash;
+    uint64_t hash, quick; /* (quick: MenuLabels_Quick) */
     int isRect, texW, texH, x, y, w;
     const char *text;
     int height, cap, baseline, center, margin, art, widthMilli;
@@ -1297,6 +1298,7 @@ static int ml_rows(MlCtx *c) {
                 snprintf(r->id, sizeof(r->id), "%s/0/%d", g->id, n);
                 r->isRect = 1;
                 r->hash = tex->hash;
+                r->quick = MenuLabels_Quick(tex->rgba, tex->w, tex->h);
                 r->texW = g->width;
                 r->texH = tex->h;
                 r->x = rc->x;
@@ -1365,6 +1367,7 @@ static int ml_rows(MlCtx *c) {
                 }
                 snprintf(r->id, sizeof(r->id), "%s/%d/%d", g->id, t, y / g->height);
                 r->hash = tex->hash;
+                r->quick = MenuLabels_Quick(tex->rgba, tex->w, tex->h);
                 r->texW = g->width;
                 r->texH = tex->h;
                 r->y = y;
@@ -1534,7 +1537,7 @@ static int ml_tsv(MlCtx *c, MlText *labels, MlText *styles, int *count) {
     int i;
 
     ml_put(labels, "# " MENU_LABELS_VERSION " hash width height y row_height cap_height baseline center margin width_milli x row_width art_width top bottom "
-                   "middle_rgb has_middle outline italic outline_milli outer_milli outer_rgb shadow outline_bottom bevel_milli bevel_light bevel_dark depth_milli mid_gradient font_face label_id\n");
+                   "middle_rgb has_middle outline italic outline_milli outer_milli outer_rgb shadow outline_bottom bevel_milli bevel_light bevel_dark depth_milli mid_gradient font_face label_id quick\n");
     /* the names of added songs and stages are drawn like the disc's (ui.cpp) */
     ml_put(styles, "# kind (0 song, 1 selected song, 2 stage) cap_height baseline margin width_milli top bottom outline\n");
     for (i = 0; i < 3; i++) {
@@ -1557,7 +1560,7 @@ static int ml_tsv(MlCtx *c, MlText *labels, MlText *styles, int *count) {
             return ml_fail(c, "%s: the label was measured outside its texture", r->id);
         }
         if (original == NULL || original[0] == '\0') return ml_fail(c, "%s: original label is missing", r->id);
-        ml_put(labels, "%016llx\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%d\t%s\t%d\t%d\t%d\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%s\n", (unsigned long long)r->hash,
+        ml_put(labels, "%016llx\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%d\t%s\t%d\t%d\t%d\t%s\t%d\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%s\t%016llx\n", (unsigned long long)r->hash,
                r->texW, r->texH, r->y, r->height, r->cap, r->baseline, r->center, r->margin,
                r->widthMilli ? r->widthMilli : 1000, r->x, r->w, r->art,
                ml_hex(col->top, top), ml_hex(col->bottom, bottom), ml_hex(col->middle, middle), col->hasMiddle,
@@ -1568,7 +1571,8 @@ static int ml_tsv(MlCtx *c, MlText *labels, MlText *styles, int *count) {
                ml_hex(r->colors == ML_MAIN_HEADING ? kHeadingBevelLight : col->top, bevelLight),
                ml_hex(r->colors == ML_MAIN_HEADING ? kHeadingBevelDark : col->depth ? col->outerColor : col->outline, bevelDark),
                (int)(col->depth * 1000.0f + 0.5f), col->midGradient, ml_starts(r->id, "notice-") || ml_starts(r->id, "combo-") ||
-               ml_starts(r->id, "timer-") || ml_starts(r->id, "win-counter/") || ml_starts(r->id, "blast-stock-counter/"), r->id);
+               ml_starts(r->id, "timer-") || ml_starts(r->id, "win-counter/") || ml_starts(r->id, "blast-stock-counter/"), r->id,
+               (unsigned long long)r->quick);
         ++*count;
     }
     if (*count > ML_ROWS) {
@@ -2014,6 +2018,8 @@ static int ml_item_into(MlCtx *c, MlBuf screen, int part, MlTex *sheet, const un
    decoded pixels (what the renderer has when it decodes it, as the labels' hashes) and the European texture. */
 typedef struct MlArt {
     uint64_t hash;
+    uint64_t mid;            /* the hash of its middle row alone: a texture whose middle row is no art's is not one,
+                                and is turned away without the hash of all of it (MenuLabels_ArtSwap) */
     int w, h;
     uint32_t file;           /* the European texture file: sArtFile[file] */
     uint16_t index, palette; /* its texture and the texture whose colour table it is drawn with */
@@ -2025,13 +2031,31 @@ typedef struct MlArt {
 
 static struct { const uint8_t *p; size_t n; } *sArtFile;
 static MlArt *sArt;
-static int sArtCount, sArtReady;
+static uint64_t *sArtMid;                        /* the art's middle-row hashes, in order */
+static int sArtCount, sArtMidCount, sArtReady;
 static uint8_t sArtSize[10][10];                 /* the sizes (as powers of two) any of them has */
 static pthread_mutex_t sArtLock = PTHREAD_MUTEX_INITIALIZER;
 
 static int ml_art_order(const void *a, const void *b) {
     const MlArt *x = a, *y = b;
     return x->hash < y->hash ? -1 : x->hash > y->hash ? 1 : 0;
+}
+
+static int ml_mid_order(const void *a, const void *b) {
+    uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/* The hash of row h / 2 (within the first ML_ART_TOP rows of a main menu sheet: the same in its "top" entry). */
+static uint64_t ml_mid_hash(const uint8_t *rgba, int w, int h) {
+    uint64_t hash = UINT64_C(14695981039346656037);
+    const uint8_t *row = rgba + (size_t)w * (size_t)(h / 2) * 4;
+    size_t i;
+
+    for (i = 0; i < (size_t)w * 4; i++) {
+        hash = (hash ^ row[i]) * UINT64_C(1099511628211);
+    }
+    return hash;
 }
 
 static int ml_log2(int v) {
@@ -2063,6 +2087,7 @@ static int ml_art_one(MlBuf usa, MlBuf eu, uint32_t file, uint32_t index, uint32
         r = memcmp(a.rgba, b.rgba, (size_t)a.w * a.h * 4) != 0;
         if (r) {
             out->hash = a.hash;
+            out->mid = ml_mid_hash(a.rgba, a.w, a.h);
             out->w = a.w;
             out->h = a.h;
             out->file = file;
@@ -2184,6 +2209,66 @@ static uint8_t *ml_member(MlBuf packed, int raw, size_t *n) {
     return out;
 }
 
+/* The startup selector is in EU0, not the EU1 archives used for translated menu lettering. The three
+   decoded hashes identify the exact original pictures and reject a different or damaged archive. */
+static const struct { int id, index, w, h; uint64_t hash; } kMlLanguageArt[] = {
+    {TBO_LANG_BG,          1, 256, 512, UINT64_C(0xab29f0394b8dccee)},
+    {TBO_LANG_ARROW_LEFT,  6,  32,  32, UINT64_C(0xb46a6e3e734cdff9)},
+    {TBO_LANG_ARROW_RIGHT, 5,  32,  32, UINT64_C(0x9c1b444555c4b833)}
+};
+
+static int ml_language_path(char *path, size_t capacity) {
+    const char *data = getenv("BT3_DATA");
+    int n = snprintf(path, capacity, "%s/pzs3eu0/00001.bin", data != NULL && *data != 0 ? data : "gamedata");
+    return n >= 0 && (size_t)n < capacity;
+}
+
+int MenuLabels_LanguageArtAvailable(void) {
+    char path[1200];
+    return ml_language_path(path, sizeof(path)) && access(path, 0) == 0;
+}
+
+int MenuLabels_LanguageArtPixels(int id, unsigned char **pixels, int *w, int *h) {
+    MlCtx *c = NULL;
+    MlTex tex = {0};
+    MlBuf packed, member, part;
+    uint8_t *file = NULL, *unpacked = NULL, *copy = NULL;
+    const int art = id - TBO_LANG_BG;
+    char path[1200];
+    FILE *fp = NULL;
+    long size;
+    size_t n = 0;
+    int ok = 0;
+    if (pixels == NULL || w == NULL || h == NULL || art < 0 || art >= 3 ||
+        !ml_language_path(path, sizeof(path))) return 0;
+    *pixels = NULL;
+    fp = fopen(path, "rb");
+    if (fp == NULL || fseek(fp, 0, SEEK_END) != 0 || (size = ftell(fp)) <= 0 || size > 1024 * 1024 ||
+        fseek(fp, 0, SEEK_SET) != 0 || (file = malloc((size_t)size)) == NULL ||
+        fread(file, 1, (size_t)size, fp) != (size_t)size) goto done;
+    packed.p = file; packed.n = (size_t)size;
+    unpacked = ml_member(packed, 0, &n);
+    if (unpacked == NULL) goto done;
+    member.p = unpacked; member.n = n;
+    if (ml_table_count(member) < 1) goto done;
+    part = ml_part(member, 1);
+    if (part.n == 0 || (c = calloc(1, sizeof(*c))) == NULL ||
+        ml_texture(c, part, (uint32_t)kMlLanguageArt[art].index, &tex) <= 0 ||
+        tex.w != kMlLanguageArt[art].w || tex.h != kMlLanguageArt[art].h ||
+        tex.hash != kMlLanguageArt[art].hash ||
+        (copy = malloc((size_t)tex.w * tex.h * 4)) == NULL) goto done;
+    memcpy(copy, tex.rgba, (size_t)tex.w * tex.h * 4);
+    *pixels = copy;
+    *w = tex.w; *h = tex.h;
+    ok = 1;
+done:
+    if (fp != NULL) fclose(fp);
+    if (c != NULL) { ml_free(c); free(c); }
+    free(unpacked);
+    free(file);
+    return ok;
+}
+
 /* The two discs' sections side by side (path: the member, then the section numbers below it): every texture file
    that differs is paired (ml_art_pair), its European copy kept. */
 static int ml_art_walk(MlBuf usa, MlBuf eu, int file, uint32_t *path, int depth, MlArtBuild *b) {
@@ -2301,9 +2386,16 @@ int MenuLabels_Art(const char *dataDir, int bank, char *why, size_t whyLen) {
         free(eu);
     }
     qsort(b.art, (size_t)b.n, sizeof(*b.art), ml_art_order);
+    sArtMid = malloc((size_t)(b.n > 0 ? b.n : 1) * sizeof(*sArtMid));
+    if (sArtMid == NULL) {
+        goto done;
+    }
     for (k = 0; k < (uint32_t)b.n; k++) {
         sArtSize[ml_log2(b.art[k].w)][ml_log2(b.art[k].h)] = 1;
+        sArtMid[k] = b.art[k].mid;
     }
+    qsort(sArtMid, (size_t)b.n, sizeof(*sArtMid), ml_mid_order);
+    sArtMidCount = b.n;
     sArt = b.art;
     b.art = NULL;
     sArtCount = b.n;
@@ -2342,6 +2434,11 @@ int MenuLabels_ArtSwap(unsigned char *rgba, int w, int h) {
         !sArtSize[ml_log2(w)][ml_log2(h)]) {
         return 0;
     }
+    hash = ml_mid_hash(rgba, w, h); /* (most textures of a fight have an art's size: this turns them away cheaply) */
+    if (bsearch(&hash, sArtMid, (size_t)sArtMidCount, sizeof(*sArtMid), ml_mid_order) == NULL) {
+        return 0;
+    }
+    hash = UINT64_C(14695981039346656037);
     for (i = 0; i < bytes; i++) {
         hash = (hash ^ rgba[i]) * UINT64_C(1099511628211);
     }

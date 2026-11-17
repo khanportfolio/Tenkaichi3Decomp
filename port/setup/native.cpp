@@ -8,9 +8,9 @@
 //                config/DBZP.yaml and config/SLUS_216.78.yaml)
 //   game data    gamedata/disc/<loose files>, and every DATA/*.AFS archive split into gamedata/<name>/00000.bin ...
 //                (the layout of port/tools/extract_disc.py)
-//   European     optional, a second image (SLES-54945): the 60 entries of its DATA/PZS3EU1.AFS the game makes Spanish,
-//                German, French and Italian from, into gamedata/pzs3eu1/ (as port/tools/extract_eu.py); the game makes
-//                the catalogs and the menu art at its next start (ui_text_extract.c, menu_labels.c)
+//   European     optional, a second image (SLES-54945): 410 entries of DATA/PZS3EU1.AFS for translated menus/HUD,
+//                plus entry 1 of DATA/PZS3EU0.AFS for the native language selector and ZS3EUOP.ADX for the
+//                EU opening soundtrack (as port/tools/extract_eu.py).
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -353,7 +353,8 @@ void step_test(const std::string &root) {
     SDL_SetEnvironmentVariable(env, "BT3_SETTINGS", "", true);
     SDL_SetEnvironmentVariable(env, "BT3_SAVES", saves.c_str(), true);
     SDL_SetEnvironmentVariable(env, "BT3_GS", "none", true); // no window: a release program opens one by default
-    for (const char *name : {"BT3_REPLAY", "BT3_PAD_PLAY", "BT3_PAD_REC", "BT3_DATA"}) {
+    // (BT3_A11Y_LOG: the setup's own speech log, which the demo fight would start over)
+    for (const char *name : {"BT3_REPLAY", "BT3_PAD_PLAY", "BT3_PAD_REC", "BT3_DATA", "BT3_A11Y_LOG"}) {
         SDL_UnsetEnvironmentVariable(env, name);
     }
     SDL_PropertiesID props = SDL_CreateProperties();
@@ -367,7 +368,12 @@ void step_test(const std::string &root) {
     SDL_DestroyProperties(props);
     SDL_DestroyEnvironment(env);
     if (proc == NULL) {
+#ifdef __APPLE__
+        throw Stop{std::string("The game could not be started: ") + SDL_GetError() +
+                   " (macOS may still be blocking it: see step 0 of README.txt)"};
+#else
         throw Stop{std::string("The game could not be started: ") + SDL_GetError()};
+#endif
     }
     size_t size = 0;
     int code = -1;
@@ -414,14 +420,15 @@ void step_test(const std::string &root) {
 // The European release's archive entries: the battle HUD (5 to 9, one per language: English, Spanish, German,
 // French, Italian) and the menu archives (USA 448 + k is 451 + k + 31 per language).
 std::vector<Uint32> eu_entries() {
-    static const Uint32 kUsa[] = {448, 449, 450, 451, 452, 453, 459, 460, 461, 463, 472};
     std::vector<Uint32> out;
     for (Uint32 bank = 0; bank < 5; bank++) {
         out.push_back(5 + bank);
-        for (Uint32 usa : kUsa) {
+        for (Uint32 usa = 448; usa < 479; usa++) {
             out.push_back(451 + (usa - 448) + bank * 31);
         }
     }
+    // Story dialogue: 50 episodes for each of the five European languages.
+    for (Uint32 entry = 656; entry < 906; entry++) out.push_back(entry);
     return out;
 }
 
@@ -430,8 +437,9 @@ void step_eu(const std::string &root, const std::string &path) {
     std::string dir = root + "gamedata/pzs3eu1/";
     step("European languages");
     iso.open(path);
-    const IsoFile *sles = iso.find("SLES_549.45"), *afs = iso.find("DATA/PZS3EU1.AFS");
-    if (sles == NULL || afs == NULL) {
+    const IsoFile *sles = iso.find("SLES_549.45"), *afs = iso.find("DATA/PZS3EU1.AFS"), *selector = iso.find("DATA/PZS3EU0.AFS");
+    const IsoFile *openingAudio = iso.find("DATA/ZS3EUOP.ADX");
+    if (sles == NULL || afs == NULL || selector == NULL || openingAudio == NULL) {
         throw Stop{"This is not a disc image of the European release of Budokai Tenkaichi 3 (no SLES_549.45 on it).\n"
                    "The languages come from the European release (SLES-54945); the game itself is set up from the USA one."};
     }
@@ -462,7 +470,40 @@ void step_eu(const std::string &root, const std::string &path) {
         say(line);
         check_cancel();
     }
-    say("@ok Spanish, German, French and Italian: the game makes them at its next start");
+    iso.read(selector->offset, head, 8);
+    memcpy(&count, head + 4, 4);
+    if (memcmp(head, "AFS\0", 4) != 0 || count < 2 || selector->size < 24) {
+        throw Stop{"The language selector archive on the European disc image (DATA/PZS3EU0.AFS) is damaged."};
+    }
+    Uint32 selectorEntry[2];
+    iso.read(selector->offset + 16, selectorEntry, sizeof(selectorEntry));
+    if (selectorEntry[1] == 0 || selectorEntry[1] > (1u << 20) ||
+        (Uint64)selectorEntry[0] + selectorEntry[1] > selector->size) {
+        throw Stop{"The language selector archive on the European disc image (DATA/PZS3EU0.AFS) is damaged."};
+    }
+    std::string selectorDir = root + "gamedata/pzs3eu0/";
+    SDL_CreateDirectory(selectorDir.c_str());
+    copy_out(iso, selector->offset + selectorEntry[0], selectorEntry[1], selectorDir + "00001.part", buf);
+    if (!SDL_RenamePath((selectorDir + "00001.part").c_str(), (selectorDir + "00001.bin").c_str())) {
+        throw Stop{"Could not write " + selectorDir + "00001.bin."};
+    }
+    std::string movieDir = root + "gamedata/disc/DATA/";
+    SDL_CreateDirectory((root + "gamedata/disc/").c_str());
+    SDL_CreateDirectory(movieDir.c_str());
+    Uint8 magic[2];
+    if (openingAudio->size < 2 || openingAudio->size > (16u << 20)) {
+        throw Stop{"The European opening soundtrack has an invalid size."};
+    }
+    iso.read(openingAudio->offset, magic, sizeof(magic));
+    if (magic[0] != 0x80 || magic[1] != 0) {
+        throw Stop{"The European opening soundtrack has an invalid header."};
+    }
+    std::string dest = movieDir + "ZS3EUOP.ADX";
+    copy_out(iso, openingAudio->offset, openingAudio->size, dest + ".part", buf);
+    if (!SDL_RenamePath((dest + ".part").c_str(), dest.c_str())) {
+        throw Stop{"Could not write " + dest + "."};
+    }
+    say("@ok European languages and opening soundtrack: the game makes the languages at its next start");
 }
 
 void work(std::string root, std::string path, std::string eu) {
@@ -534,6 +575,8 @@ bool Native_Installed(const std::string &root) {
 
 bool Native_EuInstalled(const std::string &root) {
     SDL_PathInfo info;
+    if (!SDL_GetPathInfo((root + "gamedata/pzs3eu0/00001.bin").c_str(), &info)) return false;
+    if (!SDL_GetPathInfo((root + "gamedata/disc/DATA/ZS3EUOP.ADX").c_str(), &info)) return false;
     for (Uint32 e : eu_entries()) {
         char name[48];
         snprintf(name, sizeof(name), "gamedata/pzs3eu1/%05u.bin", e);

@@ -28,6 +28,11 @@ extern void *PortStageIcons_Get(int id);
 #define STGGRID_ID_LOCKED 0x3E
 #define STGGRID_ID_EMPTY 0x3F
 #endif
+#ifdef PORT
+extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
+extern void Port_MenuMovie(int index);
+extern void Port_MenuFill(int on);
+#endif
 
 /*
  * TeamSel: the team character / stage / music select of the versus modes, 0x348D78..0x351C38. One object,
@@ -962,7 +967,15 @@ void TeamSel_Draw(void) {
                 gTeamSel->bgAlpha[i] = 0x80;
             }
         }
+#ifdef PORT
+        Port_MenuPage(3); /* widescreen menus: the versus character select's page (port/src/gs_marker.c), as the one-on-one
+                             one: its backdrop and the stage pictures filling the width, each player's side at its edge */
+        Port_MenuFill(1);
         Sprite_DrawPicture(gTeamSel->bg[i], 0, 0, gTeamSel->bgAlpha[i]);
+        Port_MenuFill(0);
+#else
+        Sprite_DrawPicture(gTeamSel->bg[i], 0, 0, gTeamSel->bgAlpha[i]);
+#endif
     }
     flash = &gTeamSel->flash[0];
     for (i = 0; i < TEAMSEL_SIDES; i++) {
@@ -1356,14 +1369,27 @@ void TeamSel_Draw(void) {
             }
         }
     }
+#ifdef PORT
+    Port_MenuPage(3); /* (also when no backdrop was drawn above) */
+    for (i = 0; i < TEAMSEL_FLASH_NUM; i++) {
+        Port_MenuMovie(i == 3 || i == 4 ? i | 0x100 : i); /* (its movies as the one-on-one select's: 1, 3 and 5 the first
+                                                             player's, 2, 4, 6 the other's; 3 and 4 the rosters) */
+        Flash_Draw(&gTeamSel->flash[i]);
+    }
+    Port_MenuMovie(0);
+#else
     for (i = 0; i < TEAMSEL_FLASH_NUM; i++) {
         Flash_Draw(&gTeamSel->flash[i]);
     }
+#endif
     Font_FlushAll();
     IconWin_Draw();
     ItemPanel_Draw(0);
     ItemPanel_Draw(1);
     ItemHelp_Draw(gTeamSel->help);
+#ifdef PORT
+    Port_MenuPage(0);
+#endif
 }
 
 /* ======== 0x34D368: the per-frame update, the pad handler and the main loop ======== */

@@ -15,6 +15,7 @@
  * Not handled yet: a target sampled while it is being drawn to, region clamp / repeat, destination-alpha tests,
  * frame-buffer masks, 16-bit targets' precision.
  */
+#include <pthread.h>
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,13 @@ static SDL_GPUGraphicsPipeline *sOutlinePipe, *sKeyPipe;
 static SDL_GPUGraphicsPipeline *sPostPipe; /* the finishing pass to the window (post.frag), made at the first frame */
 static SDL_GPUTextureFormat sPostFormat;
 static int sPostTried;
+/* A script mod's look pass (native effect 6, shaders/grade.frag; gs_draw.c grade_add): its pipeline and the copy of
+   the picture it reads, and the scene's average colour followed slowly (avg.frag) for its colour balance. */
+static SDL_GPUGraphicsPipeline *sGradePipe, *sAvgPipe;
+static SDL_GPUTexture *sGradeCopy, *sBalance; /* (the copy has mipmaps; sBalance: 1 x 1) */
+static SDL_GPUSampler *sGradeSampler;         /* linear, between mipmaps too */
+static Uint32 sGradeW, sGradeH, sGradeLevels;
+static int sBalanceFresh = 1;
 static SDL_GPUTexture *sFbTex[2]; /* pictures uploaded into the two display buffers (movies) */
 static SDL_GPUShader *sFxVs, *sDclutFs;
 static SDL_GPUTexture *sDateCopy; /* the alpha bytes as they were before a run of draws that test them (TEST.DATE) */
@@ -109,7 +117,17 @@ static void copies_create(void) {
 
 /* --- the attachments of the shared targets ------------------------------------------------------------ */
 
-static void target_ensure(int i) {
+/* Spare render targets, made in quiet frames before they are needed: a target is the PS2 screen's size times the
+   internal resolution in three images (colour, the helper, depth: about 130 MB at 8x), and making one took 6.5 ms;
+   the first big effect of a fight asked for four new ones in one frame (26 ms). As many as a session has needed
+   at most (the setting gpu_targets_peak, kept from one run to the next) and are not there yet, 4 at most; one a
+   frame, after a frame drawn in under 6 ms (targets_refill). No more memory than the game takes at its peak, only
+   sooner. BT3_TARGET_SPARES=0: none. */
+#define TARGET_SPARES 4
+static SDL_GPUTexture *sSpareCol[TARGET_SPARES], *sSpareAux[TARGET_SPARES], *sSpareDep[TARGET_SPARES];
+static int sSpareCount, sTargetPeak = -1, sSpareOn = -1;
+
+static void target_make(SDL_GPUTexture **col, SDL_GPUTexture **aux, SDL_GPUTexture **dep) {
     SDL_GPUTextureCreateInfo ci;
     SDL_zero(ci);
     ci.type = SDL_GPU_TEXTURETYPE_2D;
@@ -119,12 +137,49 @@ static void target_ensure(int i) {
     ci.height = GS_H * SCALE;
     ci.layer_count_or_depth = 1;
     ci.num_levels = 1;
-    sTgCol[i] = SDL_CreateGPUTexture(sDev, &ci);
+    *col = SDL_CreateGPUTexture(sDev, &ci);
     ci.format = SDL_GPU_TEXTUREFORMAT_R8_UNORM;
-    sTgAux[i] = SDL_CreateGPUTexture(sDev, &ci);
+    *aux = SDL_CreateGPUTexture(sDev, &ci);
     ci.format = sDepthFormat;
     ci.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER; /* the depth effects read it */
-    sTgDep[i] = SDL_CreateGPUTexture(sDev, &ci);
+    *dep = SDL_CreateGPUTexture(sDev, &ci);
+}
+
+static void target_ensure(int i) {
+    extern int Port_Setting(const char *name, int def);
+    extern void Port_SettingSave(const char *name, int value);
+    if (sSpareCount > 0) {
+        sSpareCount--;
+        sTgCol[i] = sSpareCol[sSpareCount];
+        sTgAux[i] = sSpareAux[sSpareCount];
+        sTgDep[i] = sSpareDep[sSpareCount];
+    } else {
+        target_make(&sTgCol[i], &sTgAux[i], &sTgDep[i]);
+    }
+    if (sTargetPeak < 0) {
+        sTargetPeak = Port_Setting("gpu_targets_peak", 0);
+    }
+    if (i + 1 > sTargetPeak) { /* (a new most, kept for the next run: written now, as nothing writes the settings at the end) */
+        extern void Port_SettingsWrite(void);
+        sTargetPeak = i + 1;
+        Port_SettingSave("gpu_targets_peak", sTargetPeak);
+        Port_SettingsWrite();
+    }
+}
+
+static void targets_refill(uint64_t drawn) {
+    extern int Port_Setting(const char *name, int def);
+    if (sSpareOn < 0) {
+        sSpareOn = getenv("BT3_TARGET_SPARES") == NULL || atoi(getenv("BT3_TARGET_SPARES")) != 0;
+    }
+    if (sTargetPeak < 0) {
+        sTargetPeak = Port_Setting("gpu_targets_peak", 0);
+    }
+    if (!sSpareOn || drawn > 6000000ull || sSpareCount == TARGET_SPARES || gsTargetCount + sSpareCount >= sTargetPeak) {
+        return;
+    }
+    target_make(&sSpareCol[sSpareCount], &sSpareAux[sSpareCount], &sSpareDep[sSpareCount]);
+    sSpareCount++;
 }
 
 static void target_drop(int i) {
@@ -144,9 +199,99 @@ static const SDL_GPUTextureFormat kTexFormat[4] = {SDL_GPU_TEXTUREFORMAT_R8G8B8A
                                                    SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM, SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM};
 
 /* Makes a texture object; the levels' pixels come with tex_upload (the copy pass uploads them). 0 = unsupported. */
+/* Spare images, made ahead in frames with time to spare: a fight's first big effects asked for 100 and more new
+   textures in one frame, and making their images took 28 ms of it (about 0.23 ms each on an NVIDIA card under
+   Linux). Only the textures' own kind (RGBA8, one level, a power of two up to 1024 a side), by size: of each up to
+   256 x 256, 32 once it has been asked for; of a larger one, as many as the most one frame has asked for so far and
+   4 more (at most 32); 96 MB at most in all. Made at the end of a
+   frame drawn in under 10 ms, for 1 ms at most (pool_refill). An image let go is not taken back (the graphics chip
+   may still read it). BT3_TEX_POOL=0: none. */
+#define POOL_SIZES 24
+#define POOL_MAX 32
+static struct { uint32_t w, h; SDL_GPUTexture *spare[POOL_MAX]; int count, want, burst; unsigned frame; } sPool[POOL_SIZES];
+static int sPoolCount, sPoolOn = -1;
+static uint64_t sPoolBytes;
+
+static SDL_GPUTexture *image_make(uint32_t w, uint32_t h, int format, int levels) {
+    SDL_GPUTextureCreateInfo ci;
+    SDL_zero(ci);
+    ci.type = SDL_GPU_TEXTURETYPE_2D;
+    ci.format = kTexFormat[format & 3];
+    ci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    ci.width = w;
+    ci.height = h;
+    ci.layer_count_or_depth = 1;
+    ci.num_levels = (Uint32)(levels < 1 ? 1 : levels);
+    return SDL_CreateGPUTexture(sDev, &ci);
+}
+
+/* The pool of w x h (asked for now: counted in its burst), or -1 for a texture of another kind. */
+static int pool_find(uint32_t w, uint32_t h, int format, int levels) {
+    extern unsigned gGsFrame;
+    int i;
+    if (sPoolOn < 0) {
+        sPoolOn = getenv("BT3_TEX_POOL") == NULL || atoi(getenv("BT3_TEX_POOL")) != 0;
+    }
+    if (!sPoolOn || format != GS_TEXFMT_RGBA8 || levels > 1 || w > 1024 || h > 1024 || (w & (w - 1)) || (h & (h - 1))) {
+        return -1;
+    }
+    for (i = 0; i < sPoolCount && (sPool[i].w != w || sPool[i].h != h); i++) {
+    }
+    if (i == sPoolCount) {
+        if (sPoolCount == POOL_SIZES) {
+            return -1;
+        }
+        sPool[sPoolCount].w = w;
+        sPool[sPoolCount].h = h;
+        sPoolCount++;
+    }
+    if (sPool[i].frame != gGsFrame) {
+        sPool[i].frame = gGsFrame;
+        sPool[i].burst = 0;
+    }
+    if (w * h <= 65536) { /* (up to 256 x 256: 32 of them are 8 MB at most) */
+        sPool[i].want = POOL_MAX;
+    } else if (++sPool[i].burst + 4 > sPool[i].want) {
+        sPool[i].want = sPool[i].burst + 4 < POOL_MAX ? sPool[i].burst + 4 : POOL_MAX;
+    }
+    return i;
+}
+
+static void pool_refill(uint64_t drawn) {
+    uint64_t until;
+    int i;
+    if (sPoolOn != 1 || drawn > 10000000ull) {
+        return;
+    }
+    until = gpu_now() + 1000000ull;
+    for (i = 0; i < sPoolCount; i++) {
+        uint64_t bytes = (uint64_t)sPool[i].w * sPool[i].h * 4;
+        while (sPool[i].count < sPool[i].want && sPoolBytes + bytes <= 96ull << 20) {
+            SDL_GPUTexture *t;
+            if (gpu_now() >= until) {
+                return;
+            }
+            t = image_make(sPool[i].w, sPool[i].h, GS_TEXFMT_RGBA8, 1);
+            if (t == NULL) {
+                return;
+            }
+            sPool[i].spare[sPool[i].count++] = t;
+            sPoolBytes += bytes;
+        }
+    }
+}
+
 static GsTex tex_create(uint32_t w, uint32_t h, int format, int levels) {
     SDL_GPUTextureCreateInfo ci;
     SDL_GPUTexture *tex;
+    int pool = pool_find(w, h, format, levels);
+
+    if (pool >= 0 && sPool[pool].count > 0) {
+        extern unsigned gDrawImgPooled; /* BT3_DRAW_LOG */
+        gDrawImgPooled++;
+        sPoolBytes -= (uint64_t)w * h * 4;
+        return (GsTex)(uintptr_t)sPool[pool].spare[--sPool[pool].count];
+    }
 
     if (!SDL_GPUTextureSupportsFormat(sDev, kTexFormat[format & 3], SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
         return 0;
@@ -159,7 +304,14 @@ static GsTex tex_create(uint32_t w, uint32_t h, int format, int levels) {
     ci.height = h;
     ci.layer_count_or_depth = 1;
     ci.num_levels = (Uint32)(levels < 1 ? 1 : levels);
-    tex = SDL_CreateGPUTexture(sDev, &ci);
+    {
+        extern unsigned gDrawImgMade; /* BT3_DRAW_LOG */
+        extern uint64_t gDrawImgNs;
+        uint64_t t0 = gpu_now();
+        tex = SDL_CreateGPUTexture(sDev, &ci);
+        gDrawImgNs += gpu_now() - t0;
+        gDrawImgMade++;
+    }
     return (GsTex)(uintptr_t)tex;
 }
 
@@ -176,11 +328,17 @@ static int tex_upload(GsTex handle, int level, uint32_t w, uint32_t h, int forma
     sPending[sPendingCount].px = (uint32_t *)px;
     sPending[sPendingCount].bytes = bytes;
     sPending[sPendingCount].level = (uint32_t)level;
+    {
+        extern uint64_t gDrawUpBytes; /* BT3_DRAW_LOG */
+        gDrawUpBytes += bytes;
+    }
     sPendingCount++;
     return 1;
 }
 
 static void tex_destroy(GsTex tex) {
+    extern unsigned gDrawImgFreed; /* BT3_DRAW_LOG */
+    gDrawImgFreed++;
     SDL_ReleaseGPUTexture(sDev, (SDL_GPUTexture *)(uintptr_t)tex);
 }
 
@@ -196,6 +354,12 @@ static void scale_changed(void) {
     for (i = 0; i < gsTargetCount; i++) {
         target_drop(i);
     }
+    while (sSpareCount > 0) { /* (the spares are the old size) */
+        sSpareCount--;
+        SDL_ReleaseGPUTexture(sDev, sSpareCol[sSpareCount]);
+        SDL_ReleaseGPUTexture(sDev, sSpareAux[sSpareCount]);
+        SDL_ReleaseGPUTexture(sDev, sSpareDep[sSpareCount]);
+    }
     SDL_ReleaseGPUTexture(sDev, sAuxCopy);
     SDL_ReleaseGPUTexture(sDev, sDateCopy);
     copies_create();
@@ -203,6 +367,112 @@ static void scale_changed(void) {
 
 /* The settings window (F1, ui.cpp) and the shared window it lives in are gs_draw.c's: what the user changes
    there reaches this back end through gsScale, gsFxOff and gsGlowPercent. */
+
+/* --- measuring which kind of pass costs what (branch native-fx) -------------------------------------
+   Every draw is one of: 1 into another buffer than the picture (the glow chain, the blur by depth, the haze, the
+   shadow page), 2 onto the picture reading a buffer drawn before (an effect put back), 4 onto the picture through a
+   vertex program (the fighters, the stage, 3D effects), 8 onto the picture from GS vertices (sprites: auras,
+   flashes, rays, smoke, particles, the HUD). BT3_FX_SKIP=<bits>: those are left out
+   (the picture is wrong: only for the time it takes). BT3_FX_STAT=<n>: every n frames, per kind and per buffer, the
+   draws and the pixels of their scissors. */
+static struct { double px[4]; unsigned draws[4]; unsigned fbp[64]; double fpx[64]; unsigned fdraws[64]; int nf; unsigned frames; } sFx;
+static int fx_kind(const GsDraw *d) {
+    uint32_t fbp = gsTargets[d->target].fbp;
+    if (fbp != 0x000 && fbp != 0x070) {
+        return 0;
+    }
+    if (d->tex_is_target) {
+        return 1;
+    }
+    return d->vu ? 2 : 3;
+}
+static int fx_measure(const GsDraw *d) {
+    static int skip = -1, stat = -1;
+    int k;
+    if (skip < 0) {
+        skip = getenv("BT3_FX_SKIP") != NULL ? atoi(getenv("BT3_FX_SKIP")) : 0;
+        stat = getenv("BT3_FX_STAT") != NULL ? atoi(getenv("BT3_FX_STAT")) : 0;
+    }
+    if (skip == 0 && stat == 0) {
+        return 0;
+    }
+    k = fx_kind(d);
+    if (stat) {
+        double px = (double)d->scissor[2] * d->scissor[3];
+        int i;
+        sFx.px[k] += px;
+        sFx.draws[k]++;
+        if (k == 0) {
+            for (i = 0; i < sFx.nf && sFx.fbp[i] != gsTargets[d->target].fbp; i++) {
+            }
+            if (i == sFx.nf && sFx.nf < 64) {
+                sFx.fbp[sFx.nf++] = gsTargets[d->target].fbp;
+            }
+            if (i < 64) {
+                sFx.fpx[i] += px;
+                sFx.fdraws[i]++;
+            }
+        }
+    }
+    return (skip >> k) & 1;
+}
+static void fx_frame(void) {
+    static const char *const names[4] = {"other buffers", "effects put back", "3D (vertex programs)", "sprites (GS vertices)"};
+    int k;
+    if (getenv("BT3_FX_STAT") == NULL || ++sFx.frames < (unsigned)atoi(getenv("BT3_FX_STAT"))) {
+        return;
+    }
+    fprintf(stderr, "fx: frame %u, per frame over %u (scissor pixels in millions at this scale)\n", gGsFrame, sFx.frames);
+    for (k = 0; k < 4; k++) {
+        fprintf(stderr, "fx:   %-24s %7.1f draws %8.2f Mpx\n", names[k], sFx.draws[k] / (double)sFx.frames, sFx.px[k] / 1e6 / sFx.frames);
+    }
+    for (k = 0; k < sFx.nf; k++) {
+        fprintf(stderr, "fx:     buffer %03x %7.1f draws %8.2f Mpx\n", sFx.fbp[k], sFx.fdraws[k] / (double)sFx.frames, sFx.fpx[k] / 1e6 / sFx.frames);
+    }
+    memset(&sFx, 0, sizeof(sFx));
+}
+
+/* BT3_LAG_LOG: when the graphics chip has finished a frame handed over ("lag G", after the frame's "lag S"): a thread
+   of its own waits for each frame's fence in turn. Only with the log. */
+static SDL_GPUFence *sLagFences[16];
+static unsigned sLagHead, sLagTail;
+static pthread_mutex_t sLagLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t sLagWake = PTHREAD_COND_INITIALIZER;
+static void *lag_waiter(void *unused) {
+    extern void Port_LagMark(int what);
+    (void)unused;
+    for (;;) {
+        SDL_GPUFence *f;
+        pthread_mutex_lock(&sLagLock);
+        while (sLagHead == sLagTail) {
+            pthread_cond_wait(&sLagWake, &sLagLock);
+        }
+        f = sLagFences[sLagTail++ % 16];
+        pthread_mutex_unlock(&sLagLock);
+        if (f != NULL) {
+            SDL_WaitForGPUFences(sDev, true, &f, 1);
+            Port_LagMark('G');
+            SDL_ReleaseGPUFence(sDev, f);
+        }
+    }
+    return NULL;
+}
+static void lag_fence(SDL_GPUFence *f) {
+    static int started;
+    pthread_mutex_lock(&sLagLock);
+    if (!started) {
+        pthread_t t;
+        started = 1;
+        pthread_create(&t, NULL, lag_waiter, NULL);
+    }
+    if (sLagHead - sLagTail < 16) {
+        sLagFences[sLagHead++ % 16] = f;
+        pthread_cond_signal(&sLagWake);
+    } else {
+        SDL_ReleaseGPUFence(sDev, f); /* (the waiter is behind: this one is not timed) */
+    }
+    pthread_mutex_unlock(&sLagLock);
+}
 
 /* --- pipelines ---------------------------------------------------------------------------------- */
 
@@ -323,6 +593,10 @@ static int pipeline_create(uint32_t key, int remember) {
     t0 = gpu_now();
     sPipes[sPipeCount].p = SDL_CreateGPUGraphicsPipeline(sDev, &ci);
     gGpuPipeNs += gpu_now() - t0;
+    {
+        extern uint64_t gDrawPipeNs;
+        gDrawPipeNs += gpu_now() - t0;
+    }
     if (sPipes[sPipeCount].p == NULL) {
         fprintf(stderr, "bt3: pipeline %08x: %s\n", key, SDL_GetError());
         return 0;
@@ -538,6 +812,56 @@ static int vk_init(void) {
             fprintf(stderr, "bt3: alpha key pipeline: %s\n", SDL_GetError());
             return 0;
         }
+        /* the look pass: the picture's colours replaced, alpha (the objects' numbers) kept. Without it the picture
+           stays as the game draws it. */
+        fs = shader(SHADER_CODE(kGradeFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
+        cd.blend_state.enable_blend = false;
+        ci.fragment_shader = fs;
+        sGradePipe = fs ? SDL_CreateGPUGraphicsPipeline(sDev, &ci) : NULL;
+        if (fs) { SDL_ReleaseGPUShader(sDev, fs); }
+        if (sGradePipe == NULL) {
+            fprintf(stderr, "bt3: look pipeline: %s (the colours stay as they are)\n", SDL_GetError());
+        }
+        {   /* the scene's average, followed slowly: new * k + old * (1 - k), k the blend constant */
+            SDL_GPUColorTargetDescription ad = cd;
+            SDL_GPUGraphicsPipelineCreateInfo ai = ci;
+            SDL_GPUSamplerCreateInfo si;
+            SDL_GPUTextureCreateInfo tci;
+            ad.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+            ad.blend_state.enable_blend = true;
+            ad.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_CONSTANT_COLOR;
+            ad.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR;
+            ad.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+            ad.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            ad.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+            ad.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            ad.blend_state.enable_color_write_mask = false;
+            ai.target_info.color_target_descriptions = &ad;
+            fs = shader(SHADER_CODE(kAvgFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+            ai.fragment_shader = fs;
+            sAvgPipe = fs ? SDL_CreateGPUGraphicsPipeline(sDev, &ai) : NULL;
+            if (fs) { SDL_ReleaseGPUShader(sDev, fs); }
+            SDL_zero(si);
+            si.min_filter = SDL_GPU_FILTER_LINEAR;
+            si.mag_filter = SDL_GPU_FILTER_LINEAR;
+            si.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+            si.address_mode_u = si.address_mode_v = si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+            si.max_lod = 1000.0f;
+            sGradeSampler = SDL_CreateGPUSampler(sDev, &si);
+            SDL_zero(tci);
+            tci.type = SDL_GPU_TEXTURETYPE_2D;
+            tci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+            tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+            tci.width = tci.height = 1;
+            tci.layer_count_or_depth = 1;
+            tci.num_levels = 1;
+            sBalance = SDL_CreateGPUTexture(sDev, &tci);
+            if (sAvgPipe == NULL || sGradeSampler == NULL || sBalance == NULL) {
+                fprintf(stderr, "bt3: look balance: %s (the colours stay as they are)\n", SDL_GetError());
+                if (sGradePipe) { SDL_ReleaseGPUGraphicsPipeline(sDev, sGradePipe); sGradePipe = NULL; }
+            }
+        }
+        cd.blend_state.enable_blend = true;
     }
     sDclutFs = shader(SHADER_CODE(kDclutFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
     copies_create();
@@ -552,7 +876,15 @@ static int vk_init(void) {
     if (!Ui_Init(sWindow, sDev, NULL, gpuName)) {
         fprintf(stderr, "bt3: the settings window could not be set up\n");
     }
-    fprintf(stderr, "bt3: GPU renderer: %s\n", SDL_GetGPUDeviceDriver(sDev));
+    {   /* which graphics chip draws the game, and its driver (as F1 > Video shows): on a laptop with two the slower
+           one can be the one used */
+        const char *name = gpuName != NULL ? gpuName : "", *driver = "";
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+        driver = SDL_GetStringProperty(SDL_GetGPUDeviceProperties(sDev), SDL_PROP_GPU_DEVICE_DRIVER_INFO_STRING, "");
+#endif
+        fprintf(stderr, "bt3: GPU renderer: %s%s%s%s%s\n", SDL_GetGPUDeviceDriver(sDev), name[0] ? ", " : "", name,
+                driver[0] ? ", driver " : "", driver);
+    }
     fprintf(stderr, "bt3: %d logical processors, %d MB of memory\n", SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM());
     pipelines_preload();
     return 1;
@@ -750,6 +1082,7 @@ static int pipe_no_aux(int p) {
 }
 
 static void vk_frame_end(void) {
+    fx_frame();
     SDL_GPUCommandBuffer *cmd;
     SDL_GPUCopyPass *copy;
     SDL_GPURenderPass *pass = NULL;
@@ -900,30 +1233,52 @@ static void vk_frame_end(void) {
         dst.size = gsVuIdxCount * sizeof(uint32_t);
         SDL_UploadToGPUBuffer(copy, &src, &dst, true);
     }
-    for (i = 0; i < sPendingCount; i++) {
-        SDL_GPUTransferBufferCreateInfo ti;
-        SDL_GPUTransferBuffer *tb;
-        SDL_GPUTextureTransferInfo src;
-        SDL_GPUTextureRegion dst;
-        void *p;
-        SDL_zero(ti);
-        ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        ti.size = sPending[i].bytes ? sPending[i].bytes : sPending[i].w * sPending[i].h * 4;
-        tb = SDL_CreateGPUTransferBuffer(sDev, &ti);
-        p = SDL_MapGPUTransferBuffer(sDev, tb, false);
-        memcpy(p, sPending[i].px, ti.size);
-        SDL_UnmapGPUTransferBuffer(sDev, tb);
-        SDL_zero(src);
-        src.transfer_buffer = tb;
-        SDL_zero(dst);
-        dst.texture = sPending[i].tex;
-        dst.mip_level = sPending[i].level;
-        dst.w = sPending[i].w;
-        dst.h = sPending[i].h;
-        dst.d = 1;
-        SDL_UploadToGPUTexture(copy, &src, &dst, false);
-        SDL_ReleaseGPUTransferBuffer(sDev, tb);
-        free(sPending[i].px);
+    if (sPendingCount != 0) {
+        /* The frame's textures through one upload buffer, each level at its own offset (16-byte aligned), mapped
+           once: a buffer made, mapped and let go for every level (a pack's picture has up to 11) cost the frame
+           and the driver's hand-over after it most of a large pack's time. The buffer stays and grows; SDL hands a
+           fresh one (cycle) while the last frame's is still being read. */
+        static SDL_GPUTransferBuffer *tb;
+        static uint32_t tbSize;
+        uint32_t total = 0, at = 0;
+        uint8_t *p;
+        for (i = 0; i < sPendingCount; i++) {
+            total += ((sPending[i].bytes ? sPending[i].bytes : sPending[i].w * sPending[i].h * 4) + 15) & ~15u;
+        }
+        if (tb == NULL || total > tbSize) {
+            SDL_GPUTransferBufferCreateInfo ti;
+            if (tb != NULL) {
+                SDL_ReleaseGPUTransferBuffer(sDev, tb);
+            }
+            SDL_zero(ti);
+            ti.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            ti.size = tbSize = total > (4u << 20) ? (total + 0xFFFFF) & ~0xFFFFFu : 4u << 20;
+            tb = SDL_CreateGPUTransferBuffer(sDev, &ti);
+        }
+        p = tb != NULL ? SDL_MapGPUTransferBuffer(sDev, tb, true) : NULL;
+        for (i = 0; i < sPendingCount; i++) {
+            uint32_t bytes = sPending[i].bytes ? sPending[i].bytes : sPending[i].w * sPending[i].h * 4;
+            if (p != NULL) {
+                SDL_GPUTextureTransferInfo src;
+                SDL_GPUTextureRegion dst;
+                memcpy(p + at, sPending[i].px, bytes);
+                SDL_zero(src);
+                src.transfer_buffer = tb;
+                src.offset = at;
+                SDL_zero(dst);
+                dst.texture = sPending[i].tex;
+                dst.mip_level = sPending[i].level;
+                dst.w = sPending[i].w;
+                dst.h = sPending[i].h;
+                dst.d = 1;
+                SDL_UploadToGPUTexture(copy, &src, &dst, false);
+                at += (bytes + 15) & ~15u;
+            }
+            free(sPending[i].px);
+        }
+        if (p != NULL) {
+            SDL_UnmapGPUTransferBuffer(sDev, tb);
+        }
     }
     sPendingCount = 0;
     /* A picture the game uploaded straight into a display buffer (a movie frame): from GS memory into a 512 x 448
@@ -1099,6 +1454,107 @@ static void vk_frame_end(void) {
             SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
             SDL_EndGPURenderPass(pass);
             pass = NULL;
+            continue;
+        }
+        if (d->native == 6) { /* a script mod's look: the picture copied, then drawn back over itself, changed */
+            if (pass != NULL) {
+                SDL_EndGPURenderPass(pass);
+                pass = NULL;
+            }
+            cur = -1;
+            if (sGradePipe != NULL && gsTargets[d->target].cleared) {
+                Uint32 w = GS_W * SCALE, h = GS_H * SCALE;
+                if (sGradeCopy == NULL || sGradeW != w || sGradeH != h) {
+                    SDL_GPUTextureCreateInfo tci;
+                    Uint32 m = w > h ? w : h;
+                    if (sGradeCopy != NULL) { SDL_ReleaseGPUTexture(sDev, sGradeCopy); }
+                    for (sGradeLevels = 1; (m >> sGradeLevels) > 0; sGradeLevels++) {
+                    }
+                    SDL_zero(tci);
+                    tci.type = SDL_GPU_TEXTURETYPE_2D;
+                    tci.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+                    tci.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+                    tci.width = w;
+                    tci.height = h;
+                    tci.layer_count_or_depth = 1;
+                    tci.num_levels = sGradeLevels; /* (the blur of the energy light and the scene's average) */
+                    sGradeCopy = SDL_CreateGPUTexture(sDev, &tci);
+                    sGradeW = w;
+                    sGradeH = h;
+                }
+                if (sGradeCopy != NULL) {
+                    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+                    SDL_GPUTextureLocation from, to;
+                    SDL_GPUColorTargetInfo ft;
+                    SDL_GPUTextureSamplerBinding fs[3];
+                    float params[16 + GS_LIGHTS * 8];
+                    SDL_zero(from);
+                    SDL_zero(to);
+                    from.texture = sTgCol[d->target];
+                    to.texture = sGradeCopy;
+                    SDL_CopyGPUTextureToTexture(cp, &from, &to, w, h, 1, false);
+                    SDL_EndGPUCopyPass(cp);
+                    SDL_GenerateMipmapsForGPUTexture(cmd, sGradeCopy);
+                    {   /* the scene's average into the slow one (the first time: taken as it is) */
+                        SDL_GPUColorTargetInfo bt;
+                        SDL_GPUTextureSamplerBinding bs;
+                        SDL_FColor k;
+                        /* a level where the picture (512 x 448 GS pixels of the 1024 x 1024 buffer) is ~8 texels across */
+                        float lod[4] = {6.0f, 512.0f / (float)GS_W, 448.0f / (float)GS_H, 0.0f};
+                        for (Uint32 sc3 = SCALE; sc3 > 1; sc3 >>= 1) { lod[0] += 1.0f; }
+                        SDL_zero(bt);
+                        bt.texture = sBalance;
+                        bt.load_op = sBalanceFresh ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+                        bt.store_op = SDL_GPU_STOREOP_STORE;
+                        pass = SDL_BeginGPURenderPass(cmd, &bt, 1, NULL);
+                        SDL_BindGPUGraphicsPipeline(pass, sAvgPipe);
+                        k.r = k.g = k.b = k.a = sBalanceFresh ? 1.0f : 0.06f;
+                        SDL_SetGPUBlendConstants(pass, k);
+                        bs.texture = sGradeCopy;
+                        bs.sampler = sGradeSampler;
+                        SDL_BindGPUFragmentSamplers(pass, 0, &bs, 1);
+                        SDL_PushGPUFragmentUniformData(cmd, 0, lod, sizeof(lod));
+                        SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+                        SDL_EndGPURenderPass(pass);
+                        pass = NULL;
+                        sBalanceFresh = 0;
+                    }
+                    SDL_zero(ft);
+                    ft.texture = sTgCol[d->target];
+                    ft.load_op = SDL_GPU_LOADOP_LOAD;
+                    ft.store_op = SDL_GPU_STOREOP_STORE;
+                    pass = SDL_BeginGPURenderPass(cmd, &ft, 1, NULL);
+                    SDL_BindGPUGraphicsPipeline(pass, sGradePipe);
+                    fs[0].texture = sGradeCopy;
+                    fs[0].sampler = sGradeSampler; /* (level 0 at its own size; the blurs from the mipmaps) */
+                    fs[1].texture = sTgDep[d->target]; /* (the ambient shadows read the depth) */
+                    fs[1].sampler = sSamplers[6];
+                    fs[2].texture = sBalance;
+                    fs[2].sampler = sSamplers[6];
+                    SDL_BindGPUFragmentSamplers(pass, 0, fs, 3);
+                    memcpy(params, d->misc, sizeof(float) * 4);
+                    memcpy(params + 4, d->rect, sizeof(float) * 4);
+                    memcpy(params + 8, d->orig, sizeof(float) * 4);
+                    params[12] = d->blendc;                  /* (the depth buffer's maximum / 65536) */
+                    params[13] = (float)d->mode[0] / 100.0f; /* balance */
+                    params[14] = (float)d->mode[1] / 100.0f; /* energy light */
+                    {   /* the frame's energy lights (gs_draw.c light_add) */
+                        int set = d->src >= 0 && d->src < GS_LIGHT_SETS ? d->src : 0, n = gsGradeLightCount[set];
+                        params[15] = (float)n;
+                        for (int li = 0; li < GS_LIGHTS; li++) {
+                            const GsLight *l = &gsGradeLights[set][li];
+                            float *o = params + 16 + li * 8;
+                            if (li >= n) { memset(o, 0, sizeof(float) * 8); continue; }
+                            o[0] = l->x; o[1] = l->y; o[2] = l->rad; o[3] = l->z;
+                            o[4] = l->r; o[5] = l->g; o[6] = l->b; o[7] = l->w;
+                        }
+                    }
+                    SDL_PushGPUFragmentUniformData(cmd, 0, params, sizeof(params));
+                    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+                    SDL_EndGPURenderPass(pass);
+                    pass = NULL;
+                }
+            }
             continue;
         }
         if (d->native) { /* a native full-screen effect: its own pass on the colour texture alone, reading the alpha copy */
@@ -1281,6 +1737,9 @@ static void vk_frame_end(void) {
             SDL_SetGPUScissor(pass, &r);
             memcpy(lastScissor, d->scissor, sizeof(lastScissor));
             haveScissor = 1;
+        }
+        if (fx_measure(d)) {
+            continue;
         }
         if (d->vu) {
             SDL_DrawGPUIndexedPrimitives(pass, d->count, 1, d->first, 0, 0);
@@ -1491,7 +1950,43 @@ static void vk_frame_end(void) {
         }
     }
     sEndT[4] = gpu_now();
-    SDL_SubmitGPUCommandBuffer(cmd); { extern void Port_LagMark(int what); Port_LagMark('S'); }
+    if (getenv("BT3_LAG_LOG") != NULL) { /* (and when the graphics chip has finished it: lag_fence) */
+        SDL_GPUFence *f = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+        extern void Port_LagMark(int what);
+        Port_LagMark('S');
+        lag_fence(f);
+    } else {
+        SDL_SubmitGPUCommandBuffer(cmd); { extern void Port_LagMark(int what); Port_LagMark('S'); }
+    }
+    {   /* BT3_DRAW_LOG=<ms>: each picture whose drawing took longer, from the start of its list to the driver, in parts:
+           to find what makes a drawing slow now and then (a laptop: 1 in 10 took 10 to 20 ms instead of 2) */
+        static int limit = -1;
+        extern uint64_t gDrawStartNs, gDrawTexNs, gDrawPipeNs, gDrawUpBytes, gDrawImgNs, gDrawLookNs, gDrawVuNs, gDrawXferNs;
+        extern unsigned gDrawNewTex, gDrawImgMade, gDrawImgFreed, gDrawImgPooled, gGsFrame;
+        extern int gDrawLogged;
+        if (limit < 0) {
+            limit = getenv("BT3_DRAW_LOG") != NULL ? atoi(getenv("BT3_DRAW_LOG")) : 0;
+        }
+        if (limit > 0 && !gDrawLogged && gDrawStartNs != 0) {
+            uint64_t now = gpu_now(), total = now - gDrawStartNs;
+            gDrawLogged = 1;
+            if (total >= (uint64_t)limit * 1000000ull) {
+                uint64_t walk = sEndT[0] > gDrawStartNs ? sEndT[0] - gDrawStartNs : 0;
+                fprintf(stderr, "draw: frame %u: %.1f ms: the list %.1f (of it vertex programs %.1f, pictures into GS memory %.1f, texture lookups %.1f, %u new textures decoded %.1f, pipelines made %.1f), "
+                                "uploads %.1f, issuing the draws %.1f, waiting for the screen's buffer %.1f, showing %.1f, handing over %.1f; "
+                                "images made %u (%.1f ms) and %u spares taken, released %u, uploaded %u KB\n",
+                        gGsFrame, (double)total / 1e6, (double)walk / 1e6, (double)gDrawVuNs / 1e6, (double)gDrawXferNs / 1e6, (double)gDrawLookNs / 1e6, gDrawNewTex, (double)gDrawTexNs / 1e6, (double)gDrawPipeNs / 1e6,
+                        (double)(sEndT[1] - sEndT[0]) / 1e6, (double)(sEndT[2] - sEndT[1]) / 1e6, (double)(sEndT[3] - sEndT[2]) / 1e6,
+                        (double)(sEndT[4] - sEndT[3]) / 1e6, (double)(now - sEndT[4]) / 1e6, gDrawImgMade, (double)gDrawImgNs / 1e6, gDrawImgPooled, gDrawImgFreed,
+                        (unsigned)(gDrawUpBytes / 1024));
+            }
+        }
+    }
+    {   /* spare images for coming bursts, when this picture left time (the drawing from its list's start) */
+        extern uint64_t gDrawStartNs;
+        pool_refill(gDrawStartNs != 0 ? gpu_now() - gDrawStartNs : ~0ull);
+        targets_refill(gDrawStartNs != 0 ? gpu_now() - gDrawStartNs : ~0ull); /* (and spare render targets) */
+    }
     {   /* BT3_GS_VERBOSE: once a second, where the end of the frame spends its time */
         static uint64_t sum[5];
         static int count;
@@ -1542,7 +2037,7 @@ static void vk_frame_end(void) {
             SDL_GPUFence *fence;
             Uint32 w = 512 * SCALE, h = 448 * SCALE, x, y;
             uint8_t *px;
-            char name[64];
+            char name[600];
             FILE *fp;
 
             SDL_zero(ti);
@@ -1562,7 +2057,14 @@ static void vk_frame_end(void) {
             SDL_WaitForGPUFences(sDev, true, &fence, 1);
             SDL_ReleaseGPUFence(sDev, fence);
             px = SDL_MapGPUTransferBuffer(sDev, tb, false);
-            snprintf(name, sizeof(name), "port/build/shots/gpu_%05u.ppm", gGsFrame);
+            if (getenv("BT3_SHOT_DIR") != NULL) {
+                /* BT3_SHOT_DIR=<folder>: there instead, the vertical blank in the name too (several copies at once;
+                   two copies' pictures of the same blank compared) */
+                extern unsigned gPortVBlanks;
+                snprintf(name, sizeof(name), "%s/gpu_%05u_v%06u.ppm", getenv("BT3_SHOT_DIR"), gGsFrame, gPortVBlanks);
+            } else {
+                snprintf(name, sizeof(name), "port/build/shots/gpu_%05u.ppm", gGsFrame);
+            }
             fp = fopen(name, "wb");
             if (fp != NULL && px != NULL) {
                 fprintf(fp, "P6\n%u %u\n255\n", w, h);

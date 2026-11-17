@@ -72,9 +72,17 @@ void Ps_ScreenQuad(f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2, f32 x3, f32 y
     Dma_EndDirect(p);
 }
 
+extern int Port_TrLine(const char *original, char *out, int size); /* port/src/gs/menu_translation.c */
+
+/* (`src` in the chosen language when it is a line of the menus' translation file: the pieces a line is put together
+   from, with Ps_Cat; a whole line is translated where it is drawn, port/src/gs/tbo_text.c) */
 void Ps_Copy(char *dst, const char *src, s32 max) {
+    static char tr[512];
     s32 i;
 
+    if (src != dst && src != tr && Port_TrLine(src, tr, sizeof(tr))) {
+        src = tr;
+    }
     for (i = 0; i < max - 1 && src[i] != 0; i++) {
         dst[i] = src[i];
     }
@@ -339,8 +347,12 @@ void Ps_Align(s32 align) {
 }
 
 
+/* Across, a letter's share of the page: the page is stretched to the picture's width, so with the menu layout
+   "Widescreen" in a wider picture the letters are narrowed by as much, and keep their shape (plat_stub.c) */
+extern float Port_MenuTextNarrow(void);
+
 f32 Ps_TextWidth(char *str, f32 scale) {
-    return (f32)PortTbo_TextMeasure(str, 0) / 1000.0f * PS_CELL_UNITS * scale * PS_CAP_OF_CELL * PS_UNIT_X;
+    return (f32)PortTbo_TextMeasure(str, 0) / 1000.0f * PS_CELL_UNITS * scale * PS_CAP_OF_CELL * PS_UNIT_X * Port_MenuTextNarrow();
 }
 
 /* Where a line of `scale` starts (its y) for its capitals to be centred on `middle`. */
@@ -373,7 +385,7 @@ u32 Ps_Mix(u32 a, u32 b, f32 t) {
    `top` to `bottom` in that many bands. */
 void Ps_Line(s32 id, f32 x, f32 base, f32 cap, f32 fit, u32 top, u32 bottom, u32 line, s32 bands, s32 alpha) {
     f32 ky = cap / 1000.0f;
-    f32 kx = ky * fit * PS_UNIT_X;
+    f32 kx = ky * fit * PS_UNIT_X * Port_MenuTextNarrow();
     f32 x0 = x - (f32)PortTbo_TextInfo(id, 4) * kx;
     f32 x1 = x0 + (f32)PortTbo_TextInfo(id, 1) * kx;
     f32 y0 = base - (f32)PortTbo_TextInfo(id, 3) * ky;
@@ -407,7 +419,7 @@ void Ps_TextExOuterXY(f32 x, f32 y, char *str, f32 scaleX, f32 scaleY, f32 width
     if (str[0] == 0 || (id = PortTbo_TextId(str, 0)) < 0) {
         return;
     }
-    w = (f32)PortTbo_TextInfo(id, 0) / 1000.0f * PS_CELL_UNITS * scaleX * PS_CAP_OF_CELL * PS_UNIT_X;
+    w = (f32)PortTbo_TextInfo(id, 0) / 1000.0f * PS_CELL_UNITS * scaleX * PS_CAP_OF_CELL * PS_UNIT_X * Port_MenuTextNarrow();
     if (width > 0.0f && w > width) {
         fit = width / w;
         if (fit < 0.6f) {
@@ -465,7 +477,7 @@ void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
     if (str[0] == 0 || (id = PortTbo_TextId(str, 2)) < 0) {
         return;
     }
-    w = (f32)PortTbo_TextInfo(id, 0) / 1000.0f * cap * PS_UNIT_X;
+    w = (f32)PortTbo_TextInfo(id, 0) / 1000.0f * cap * PS_UNIT_X * Port_MenuTextNarrow();
     if (width > 0.0f && w > width) {
         fit = width / w;
         if (fit < 0.6f) {
@@ -478,7 +490,7 @@ void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
     } else if (sPsAlign == 2) {
         x -= w;
     }
-    kx = ky * fit * PS_UNIT_X;
+    kx = ky * fit * PS_UNIT_X * Port_MenuTextNarrow();
     x0 = x - (f32)PortTbo_TextInfo(id, 4) * kx;
     y0 = y + cell * PS_BASE_OF_CELL - (f32)PortTbo_TextInfo(id, 3) * ky;
     Ps_Sprite(id, x0, y0, x0 + (f32)PortTbo_TextInfo(id, 1) * kx, y0 + (f32)PortTbo_TextInfo(id, 2) * ky, 0.0f, 0.0f, 1.0f, 1.0f,
@@ -489,7 +501,7 @@ void Ps_Heading(f32 x, f32 y, char *str, f32 scale, f32 width, s32 alpha) {
    menu's own), white with a thin dark edge ---- */
 
 f32 Ps_MsgWidth(char *str, f32 scale) {
-    return (f32)PortTbo_TextMeasure(str, 1) / 1000.0f * PS_MSG_CAP * scale * PS_UNIT_X;
+    return (f32)PortTbo_TextMeasure(str, 1) / 1000.0f * PS_MSG_CAP * scale * PS_UNIT_X * Port_MenuTextNarrow();
 }
 
 void Ps_Msg(f32 x, f32 y, char *str, f32 scale, s32 alpha) {
