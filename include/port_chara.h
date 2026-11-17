@@ -63,8 +63,10 @@ extern void *PortChips_Get(int chara), *Port_CharaNamePack(void *pack);
 extern int Port_CharaNameLine(int chara), Port_CharaCount(void), Port_NetSession(void);
 extern int Port_CharaForms(int chara, int *out, int max);
 extern void Port_CharaCellLog(int cell, int chara, int forms); /* BT3_CHARA_LOG: the cells made for added characters */
+/* (both branches cast to the same pointer: in the game's code (void *) is a 4-byte pointer, and a conditional
+   mixing it with the port's ordinary one made the Mac build's IR invalid in the six menu files using this) */
 #define PORT_CHIP(pack, id) \
-    (PORT_CHARA_ADDED(id) && PortChips_Get(id) != NULL ? PortChips_Get(id) : (void *)MPACK_AT(pack, CHARA_T(id) + 1))
+    (PORT_CHARA_ADDED(id) && PortChips_Get(id) != NULL ? (void *)PortChips_Get(id) : (void *)MPACK_AT(pack, CHARA_T(id) + 1))
 /* A disc character that a folder REPLACES (`replaces=` in its character.txt) keeps its id, and needs nothing of
    the above: its files are answered for the disc's own file numbers (PortCharas_Alias), PortChips_Load(pack) puts
    its chip over the disc's entry of the screen's pack, and Port_CharaNamePack / Port_CharaFormPack change its own
