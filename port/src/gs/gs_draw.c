@@ -547,6 +547,56 @@ static GsTex tbo_text_texture(uint32_t id) {
     return tex;
 }
 
+/* The lobby's own pictures (include/menu/tbo_art.h, TBO_EXTRA_BASE): read from tbo/ui/fighters, tbo/ui/stages and
+   tbo/ui/lobby_bg.png the first time, kept; one that is missing is drawn as nothing and not looked for again. */
+static GsTex sExtraTex[TBO_EXTRA_COUNT];
+static unsigned char sExtraMissing[TBO_EXTRA_COUNT];
+static GsTex tbo_extra_texture(uint32_t id) {
+    char path[1024], rel[96];
+    SDL_Surface *png, *rgba;
+    uint32_t *px, w, h, x, y, k = id - TBO_EXTRA_BASE;
+    const char *base;
+    GsTex tex;
+    if (sExtraMissing[k]) return gsWhite;
+    if (sExtraTex[k] != 0) return sExtraTex[k];
+    if (sBackend->texSlotsLeft() <= 0) return gsWhite;
+    if (id >= TBO_LOBBY_BG) {
+        snprintf(rel, sizeof(rel), "tbo/ui/lobby_bg.png");
+    } else if (id >= TBO_STAGE_BASE) {
+        snprintf(rel, sizeof(rel), "tbo/ui/stages/%03u.png", (unsigned)(id - TBO_STAGE_BASE));
+    } else {
+        snprintf(rel, sizeof(rel), "tbo/ui/fighters/%03u.png", (unsigned)(id - TBO_FIGHTER_BASE));
+    }
+    base = SDL_GetBasePath();
+    snprintf(path, sizeof(path), "%s%s", base != NULL ? base : "", rel);
+    png = SDL_LoadPNG(path);
+    if (png == NULL) {
+        png = SDL_LoadPNG(rel);
+    }
+    rgba = png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
+    if (png != NULL) SDL_DestroySurface(png);
+    if (rgba == NULL) {
+        sExtraMissing[k] = 1;
+        return gsWhite;
+    }
+    w = (uint32_t)rgba->w;
+    h = (uint32_t)rgba->h;
+    px = malloc((size_t)w * h * 4);
+    for (y = 0; px != NULL && y < h; y++) {
+        const uint8_t *row = (const uint8_t *)rgba->pixels + (size_t)y * rgba->pitch;
+        for (x = 0; x < w; x++) {
+            const uint8_t *c = row + x * 4;
+            px[y * w + x] = (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) | (((uint32_t)c[3] * 128 + 127) / 255 << 24);
+        }
+    }
+    SDL_DestroySurface(rgba);
+    if (px == NULL) return gsWhite;
+    tex = tbo_upload(px, w, h);
+    if (tex == 0) return gsWhite;
+    sExtraTex[k] = tex;
+    return tex;
+}
+
 static GsTex tbo_texture(uint32_t id) {
     char path[1024] = {0};
     SDL_Surface *png = NULL, *rgba = NULL;
@@ -561,6 +611,9 @@ static GsTex tbo_texture(uint32_t id) {
 
     if (id >= TBO_TEXT_BASE && id < TBO_TEXT_BASE + TBO_TEXT_SLOTS) {
         return tbo_text_texture(id);
+    }
+    if (id >= TBO_EXTRA_BASE && id < TBO_EXTRA_BASE + TBO_EXTRA_COUNT) {
+        return tbo_extra_texture(id);
     }
     if (id >= TBO_ART_COUNT && !languageArt) {
         return gsWhite;

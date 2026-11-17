@@ -529,6 +529,25 @@ static unsigned long long mods_mine(void) {
         mods_file(&h, path);
     }
     mods_file(&h, "story_talk.txt");
+    { /* (and the added stages: a lobby's match can be on one of them) */
+        char sroot[512];
+        ModList sl = {0};
+        if (PortExtras_Dir("stages", "BT3_STAGES", sroot, sizeof(sroot))) {
+            sl.cap = 512;
+            sl.names = calloc((size_t)sl.cap, sizeof(*sl.names));
+            if (sl.names != NULL) {
+                sl.base = strlen(sroot);
+                SDL_EnumerateDirectory(sroot, mods_walk, &sl);
+                qsort(sl.names, (size_t)sl.count, sizeof(*sl.names), mods_cmp);
+                for (i = 0; i < sl.count; i++) {
+                    mods_fnv(&h, sl.names[i], strlen(sl.names[i]) + 1);
+                    snprintf(path, sizeof(path), "%s/%s", sroot, sl.names[i]);
+                    mods_file(&h, path);
+                }
+                free(sl.names);
+            }
+        }
+    }
 #ifdef _WIN32
     if (GetModuleFileNameA(NULL, path, sizeof(path)) > 0) {
         mods_file(&h, path);

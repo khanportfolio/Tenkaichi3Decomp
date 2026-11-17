@@ -73,6 +73,14 @@ enum { TBO_ART_LIST(TBO_ART_ENUM) TBO_ART_COUNT };
 #define TBO_TEXT_SLOTS 256
 
 /* Native artwork for the first-run language selector, decoded from the player's EU disc. */
+/* The lobby's own pictures (17 Nov 2026, this modded copy): each fighter's portrait (tbo/ui/fighters/<id>.png, the
+   character select's 256 x 512, made by Super-Characters/tools/lobby_fighters.py), each stage's view
+   (tbo/ui/stages/<id>.png, 384 x 216) and the lobby's background (tbo/ui/lobby_bg.png). */
+#define TBO_EXTRA_BASE 0x300
+#define TBO_FIGHTER_BASE 0x300 /* + the fighter's id, 0..255 */
+#define TBO_STAGE_BASE 0x400   /* + the stage's id, 0..63 */
+#define TBO_LOBBY_BG 0x440
+#define TBO_EXTRA_COUNT 0x141
 #define TBO_LANG_BG 0x200
 #define TBO_LANG_ARROW_LEFT 0x201
 #define TBO_LANG_ARROW_RIGHT 0x202

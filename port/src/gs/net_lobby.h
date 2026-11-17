@@ -71,6 +71,8 @@ typedef struct PortLobbyView {
     int port;                   /* the owner's port (by address) */
     int taken[LOBBY_SLOTS], ready[LOBBY_SLOTS], isOwner[LOBBY_SLOTS];
     char name[LOBBY_SLOTS][LOBBY_NAME];
+    int fighter[LOBBY_SLOTS];    /* (this modded copy) each place's fighter, the character id + 1 (0: none chosen) */
+    int stage;                  /* (this modded copy) the stage of the lobby's matches: -1 random, else its id */
     int battle, time, speed, rollback, delay; /* the rules: battle 0..4 (single, team, DP 10/15/20), time 0..4, speed %,
                                                  rollback frames 0..8, delay 0 automatic else frames + 1 */
     char note[128];             /* the last thing that happened ("X left the lobby") */
@@ -113,7 +115,11 @@ typedef struct PortLobbyView {
 
 enum { LOBBY_START = 1, LOBBY_BACK, LOBBY_LEAVE, LOBBY_KICK, LOBBY_MOVE, LOBBY_RULE, LOBBY_READY, LOBBY_OK,
        LOBBY_TOUR_NEW, LOBBY_TOUR_CALLOFF, LOBBY_TOUR_CHOOSE };
-enum { LOBBY_RULE_BATTLE = 0, LOBBY_RULE_TIME, LOBBY_RULE_SPEED, LOBBY_RULE_ROLLBACK, LOBBY_RULE_DELAY, LOBBY_RULE_MODE, LOBBY_RULE_ENTRANTS };
+int Port_LobbyFighter(void);           /* (this modded copy) this player's lobby fighter: character id + 1, 0 none */
+void Port_LobbyFighterSet(int idPlus1);
+int Port_LobbyStage(void);             /* the stage the lobby's match is on (-1: chosen in the match as usual) */
+enum { LOBBY_RULE_BATTLE = 0, LOBBY_RULE_TIME, LOBBY_RULE_SPEED, LOBBY_RULE_ROLLBACK, LOBBY_RULE_DELAY, LOBBY_RULE_MODE, LOBBY_RULE_ENTRANTS,
+       LOBBY_RULE_STAGE /* (this modded copy: the stage, -1 random, then the disc's and the added ones) */ };
 
 int Port_LobbyView(PortLobbyView *out);   /* 0: no lobby (state 0) */
 /* START (versus: the match of 1P and 2P; a tournament: its next match, the two put in 1P and 2P), BACK (the owner:

@@ -585,8 +585,9 @@ void CharSel_Init(s32 section) {
            stage unlocked only 24 of 26 added stages were listed. Reported by a player.) */
         static s32 sAllIds[96];
         extern int Port_NetSession(void); /* port/src/gs/net.c */
-        s32 extra = Port_NetSession() ? 0 : gPortExtraStageCount;
-        s32 swaps = Port_NetSession() ? 0 : gPortStageReplaceCount;
+        extern int Port_NetModsHidden(void); /* port/src/gs/net.c */
+        s32 extra = Port_NetModsHidden() ? 0 : gPortExtraStageCount;
+        s32 swaps = Port_NetModsHidden() ? 0 : gPortStageReplaceCount;
         s32 n = gCharSel->stageCount, i, rows, r;
         if (n > 64) {
             n = 64;

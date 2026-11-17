@@ -1460,7 +1460,8 @@ static void Tb_Backdrop(void) {
     f32 u = aspect < pic ? aspect / pic : 1.0f;
     f32 v = aspect < pic ? 1.0f : pic / aspect;
 
-    Ps_SpriteScreen(TBO_BG, 0.0f, 0.0f, 512.0f, 448.0f, 0.5f - u * 0.5f, 0.5f - v * 0.5f, 0.5f + u * 0.5f, 0.5f + v * 0.5f, PS_PLAIN, 0x80);
+    /* (this modded copy: the lobby's page over the user's Capsule Corp picture, tbo/ui/lobby_bg.png, 16:9) */
+    Ps_SpriteScreen(sTb->mode == TB_LOBBY ? TBO_LOBBY_BG : TBO_BG, 0.0f, 0.0f, 512.0f, 448.0f, 0.5f - u * 0.5f, 0.5f - v * 0.5f, 0.5f + u * 0.5f, 0.5f + v * 0.5f, PS_PLAIN, 0x80);
 }
 
 /* The host in a pose (TBO_HOSTS_*), standing on `feet` around `cx`, `height` units tall; they breathe. The ones that
@@ -1884,9 +1885,10 @@ static void Tb_DrawProfileText(void) {
    owner starts a match every copy goes into it from here, and comes back here when it ends (the game is put back to
    this moment: gs/state.c). */
 #define LB_ROWS 8
-#define LB_RULES 6
-#define LB_BTN 6 /* the right side's items: the rules 0..5 (the mode first), then the buttons 6..9 (two rows of two) */
-#define LB_RIGHT_COUNT 10
+#define LB_RULES 8 /* (this modded copy: + Stage and My Fighter) */
+#define LB_BTN 8 /* the right side's items: the rules 0..7 (the mode first), then the buttons 8..11 (two rows of two) */
+#define LB_RIGHT_COUNT 12
+#define TB_RULE_FIGHTER 100 /* (not a lobby rule: this player's own fighter, Port_LobbyFighterSet) */
 #define LB_POP_MEMBER 1
 #define LB_POP_LEAVE 2
 #define LB_POP_CALLOFF 3 /* the owner switches a lobby with a tournament on back to Versus: called off first */
@@ -1898,11 +1900,11 @@ static void Tb_DrawProfileText(void) {
 
 
 static char *sTbBattleName[5] = {"SINGLE BATTLE", "TEAM BATTLE", "DP BATTLE: 10 DP", "DP BATTLE: 15 DP", "DP BATTLE: 20 DP"};
-static char *sTbRuleName[LB_RULES] = {"Mode", "Battle", "Time Limit", "Game Speed", "Rollback", "Input Delay"};
+static char *sTbRuleName[LB_RULES] = {"Mode", "Battle", "Time Limit", "Game Speed", "Rollback", "Input Delay", "Stage", "My Fighter"};
 /* The rule of the page's row i (the mode first, then the lobby's own in their order: LOBBY_RULE_). In Tournament
    the battle's row is the Entrants rule (a tournament's matches are single battles). */
 static s32 Tb_LbRule(s32 i) {
-    return i == 0 ? LOBBY_RULE_MODE : i == 1 && sTbLv.mode ? LOBBY_RULE_ENTRANTS : i - 1;
+    return i == 0 ? LOBBY_RULE_MODE : i == 1 && sTbLv.mode ? LOBBY_RULE_ENTRANTS : i == 6 ? LOBBY_RULE_STAGE : i == 7 ? TB_RULE_FIGHTER : i - 1;
 }
 
 static char *Tb_RuleName(s32 i) {
@@ -2082,6 +2084,20 @@ static void Tb_RuleValue(char *out, s32 i) {
             sprintf(out, Tb_Fmt("UP TO %d FRAMES"), (int)v->rollback);
         }
         break;
+    case LOBBY_RULE_STAGE: {
+        extern const char *Port_StageNameEn(int stage); /* gs/fight_panels_ui.cpp */
+        const char *nm = v->stage < 0 ? NULL : Port_StageNameEn(v->stage);
+        Ps_Copy(out, v->stage < 0 ? "PLAYERS CHOOSE" : nm != NULL ? nm : "STAGE", 40);
+        break;
+    }
+    case TB_RULE_FIGHTER: {
+        extern const char *Port_FighterNameEn(int chara); /* gs/fight_panels_ui.cpp */
+        extern int Port_LobbyFighter(void);
+        int f = Port_LobbyFighter() - 1;
+        const char *nm = f < 0 ? NULL : Port_FighterNameEn(f);
+        Ps_Copy(out, nm != NULL ? nm : "NONE", 40);
+        break;
+    }
     default:
         Tb_DelayText(out, v->delay - 1); /* (the lobby's 0 is automatic, else the frames + 1) */
         break;
@@ -2565,7 +2581,16 @@ static void Tb_LobbyUpdate(s32 live) {
             Snd_PlaySe(1, 0);
         }
         sTb->lbRight = r;
-        if (side != 0 && r < LB_BTN) {
+        if (side != 0 && r < LB_BTN && Tb_LbRule(r) == TB_RULE_FIGHTER) { /* (anyone: this player's own fighter) */
+            extern int Port_LobbyFighter(void);
+            extern void Port_LobbyFighterSet(int idPlus1);
+            extern int Port_CharaCount(void);
+            int f = Port_LobbyFighter() - 1, added = Port_CharaCount(), n = 161 + added, cur;
+            cur = f < 0 ? 0 : f < 161 ? f : f >= 198 && f < 198 + added ? 161 + (f - 198) : 0;
+            cur = (cur + side + n) % n;
+            Port_LobbyFighterSet((cur < 161 ? cur : 198 + (cur - 161)) + 1);
+            Snd_PlaySe(1, 0);
+        } else if (side != 0 && r < LB_BTN) {
             if (own && Tb_LbRule(r) == LOBBY_RULE_MODE && v->tour == 1) { /* (a tournament on: called off first, if so) */
                 Snd_PlaySe(1, 0);
                 sTb->lbPop = LB_POP_CALLOFF;
@@ -2661,7 +2686,7 @@ static f32 Tb_LobbyRowY(s32 i) {
 }
 
 static f32 Tb_LobbyRuleY(s32 i) {
-    return 124.0f + 21.5f * (f32)i;
+    return 118.0f + 17.0f * (f32)i; /* (eight rows: this modded copy's Stage and My Fighter too) */
 }
 
 static void Tb_LobbyBtnBox(s32 k, f32 *x0, f32 *y0, f32 *x1, f32 *y1) {
@@ -2713,6 +2738,16 @@ static void Tb_DrawLobby(void) {
         if (v->taken[i] && (v->isOwner[i] || i == v->me)) { /* the owner's mark, and this game's own place */
             Ps_Pill(TBO_KIT_STEEL, 160.0f, y + 5.0f, 200.0f, y + 17.0f, 0x80);
         }
+        if (v->taken[i] && v->fighter[i] > 0) { /* (this modded copy) the place's fighter: its face */
+            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[i] - 1, 30.0f, y + 1.0f, 50.0f, y + 21.0f, 0.28f, 0.03f, 0.72f, 0.25f, PS_PLAIN, 0x80);
+        }
+    }
+    /* (this modded copy) the two players standing at the foot, as the character select shows them */
+    for (k = 0; k < 2; k++) {
+        if (v->taken[k] && v->fighter[k] > 0) {
+            f32 cx = k == 0 ? 330.0f : 452.0f, h = 128.0f, w = h * 0.5f;
+            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[k] - 1, cx - w * 0.5f, 444.0f - h, cx + w * 0.5f, 444.0f, k == 0 ? 0.0f : 1.0f, 0.0f, k == 0 ? 1.0f : 0.0f, 1.0f, PS_PLAIN, 0x80);
+        }
     }
     Ps_Panel(TBO_KIT_WINDOW, LB_R0, 52.0f, LB_R1, 98.0f, 0x80);
     Ps_Panel(TBO_KIT_WINDOW, LB_R0, 101.0f, LB_R1, 255.0f, 0x80);
@@ -2721,12 +2756,12 @@ static void Tb_DrawLobby(void) {
         s32 on = sTb->lbCol == 1 && sTb->lbRight == i && !sTb->lbChat;
 
         if (on) {
-            Ps_Pill(TBO_KIT_SEL, LB_R0 + 6.0f, y - 2.0f, LB_R1 - 6.0f, y + 22.0f, 0x80);
-            if (v->owner && v->phase == 0 && !Tb_RuleFixed(i)) {
-                Ps_Button(3, LB_R1 - 20.0f, y + 10.0f, 18.0f);
+            Ps_Pill(TBO_KIT_SEL, LB_R0 + 6.0f, y - 1.0f, LB_R1 - 6.0f, y + 16.0f, 0x80);
+            if ((v->owner || Tb_LbRule(i) == TB_RULE_FIGHTER) && v->phase == 0 && !Tb_RuleFixed(i)) {
+                Ps_Button(3, LB_R1 - 20.0f, y + 7.5f, 14.0f);
             }
         } else {
-            Ps_Pill(TBO_KIT_BAR, LB_R0 + 8.0f, y, LB_R1 - 8.0f, y + 20.0f, 0x80);
+            Ps_Pill(TBO_KIT_BAR, LB_R0 + 8.0f, y, LB_R1 - 8.0f, y + 15.0f, 0x80);
         }
     }
     for (k = 0; k < 4; k++) {
@@ -2833,16 +2868,22 @@ static void Tb_DrawLobbyText(void) {
         Ps_Text(490.0f, Ps_TextTop(84.0f, 0.46f), v->phase ? "A MATCH IS ON" : v->tour == 1 ? "TOURNAMENT ON" : "TOURNAMENT OVER", 0.46f, 110.0f, v->tour == 2 && !v->phase ? 4 : 5);
         Ps_Align(0);
     }
+    /* (this modded copy) VS between the two players standing at the foot */
+    if (v->taken[0] && v->taken[1] && v->fighter[0] > 0 && v->fighter[1] > 0) {
+        Ps_Align(1);
+        Ps_Text(391.0f, Ps_TextTop(392.0f, 1.1f), "VS", 1.1f, 0.0f, 1);
+        Ps_Align(0);
+    }
     /* the rules */
-    Ps_Text(270.0f, Ps_TextTop(112.5f, 0.46f), v->owner ? "RULES" : "RULES (THE OWNER'S)", 0.46f, 220.0f, 2);
+    Ps_Text(270.0f, Ps_TextTop(108.0f, 0.46f), v->owner ? "RULES" : "RULES (THE OWNER'S)", 0.46f, 220.0f, 2);
     for (i = 0; i < LB_RULES; i++) {
-        f32 mid = Tb_LobbyRuleY(i) + 10.0f;
+        f32 mid = Tb_LobbyRuleY(i) + 7.5f;
         s32 on = sTb->lbCol == 1 && sTb->lbRight == i && !sTb->lbChat;
 
-        Ps_Text(282.0f, Ps_TextTop(mid, 0.54f), Tb_RuleName(i), 0.54f, 92.0f, on ? 1 : 0); /* (inside its bar as the places' names are) */
+        Ps_Text(282.0f, Ps_TextTop(mid, 0.46f), Tb_RuleName(i), 0.46f, 92.0f, on ? 1 : 0); /* (inside its bar as the places' names are) */
         Tb_RuleValue(line, i);
         Ps_Align(2);
-        Ps_Text(on && v->owner && v->phase == 0 && !Tb_RuleFixed(i) ? 456.0f : 482.0f, Ps_TextTop(mid, 0.46f), line, 0.46f, 124.0f, i == 0 && v->mode ? 1 : 3);
+        Ps_Text(on && (v->owner || Tb_LbRule(i) == TB_RULE_FIGHTER) && v->phase == 0 && !Tb_RuleFixed(i) ? 456.0f : 482.0f, Ps_TextTop(mid, 0.42f), line, 0.42f, 124.0f, i == 0 && v->mode ? 1 : 3);
         Ps_Align(0);
     }
     /* the buttons */

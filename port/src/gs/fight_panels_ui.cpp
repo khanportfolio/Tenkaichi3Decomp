@@ -65,6 +65,32 @@ static const char *chara_name(int chara) {
     return chara >= 0 && chara < (int)(sizeof(kCharaNames) / sizeof(kCharaNames[0])) ? kCharaNames[chara] : NULL;
 }
 
+// (this modded copy, 17 Nov 2026) Names for the online lobby's My Fighter and Stage rows (src/menu/port_tbo.c): the
+// disc's fighters by this table, the added ones by their folders (198 on); the disc's stages, then the added ones.
+extern "C" const char *Port_CharaName(int index); // port/src/plat_charas.c: an added character's name
+extern "C" const char *PortStages_Name(int index); // port/src/plat_stages.c: an added stage's name
+extern "C" const char *Port_FighterNameEn(int chara) {
+    if (chara >= 198) {
+        const char *n = Port_CharaName(chara - 198);
+        return n != NULL && n[0] != '\0' ? n : NULL;
+    }
+    return chara_name(chara);
+}
+extern "C" const char *Port_StageNameEn(int stage) {
+    static const char *const kStages[35] = {
+        "Wasteland - Noon", "Rocky Area - Noon", "Planet Namek", "Dying Namek", "World Tournament Stage - Noon",
+        "Kami's Lookout", "Cell Games Arena - Evening", "Supreme Kai's World", "Hyperbolic Time Chamber",
+        "City Ruins - Noon", "Mountain Road - Noon", "Islands", "Kame House", "Planet - Night", "Glacier",
+        "Ruined Earth", "Outer Space", "Penguin Village", "Hell", "Desert - Noon", "King's Castle", "Muscle Tower",
+        "Mount Paozu", "Wasteland - Evening", "Wasteland - Night", "Rocky Area - Evening", "Rocky Area - Night",
+        "World Tournament Stage - Evening", "Cell Game - Noon", "City Ruins - Evening", "City Ruins - Night",
+        "Desert - Evening", "Desert - Night", "Mountain Road - Evening", "Planet - Evening",
+    };
+    if (stage >= 0 && stage < 35) return kStages[stage];
+    if (stage >= 36) return PortStages_Name(stage - 36);
+    return NULL;
+}
+
 // ---------------------------------------------------------------------------------------------------- portrait files
 // A large portrait file: byte-pair packed (the game's sys/bpe.c), a texture file with one 256 x 512 picture of 256
 // colours, its pixels in the GS's 8-bit layout as the game uploads them (a 128 x 256 32-bit rectangle) and its CLUT

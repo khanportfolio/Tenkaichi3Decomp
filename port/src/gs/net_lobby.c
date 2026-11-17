@@ -109,6 +109,25 @@ enum { CLOSE_CLOSED = 1, CLOSE_KICKED = 2 };
 #define HELLO_BYTES (40 + NAMEB + 4 + TOKEN) /* (the token after the name, with its tournament's number) */
 #define TOUR LOBBY_TOUR
 
+/* (this modded copy, 17 Nov 2026) The fighter this player shows in lobbies (Profile / Change Fighter; setting
+   lobby_fighter, the character id + 1, 0 none) and the lobby's stage for its matches. */
+extern int Port_Setting(const char *name, int def);
+extern void Port_SettingSave(const char *name, int value);
+extern void Port_SettingsWrite(void);
+static volatile int sMyFighter = -1;
+int Port_LobbyFighter(void) {
+    if (sMyFighter < 0) {
+        int v = Port_Setting("lobby_fighter", 1); /* (Goku by default) */
+        sMyFighter = v < 0 || v > 256 ? 1 : v;
+    }
+    return sMyFighter;
+}
+void Port_LobbyFighterSet(int idPlus1) {
+    sMyFighter = idPlus1 < 0 || idPlus1 > 256 ? 0 : idPlus1;
+    Port_SettingSave("lobby_fighter", sMyFighter);
+    Port_SettingsWrite();
+}
+
 extern int NetIo_Version(void);
 extern void Port_UiNotice(const char *text);
 extern int Port_SessionCan(void);
@@ -132,6 +151,7 @@ typedef struct {
     int forgetLeft;            /* ... and how many more times it is told to forget it */
     uint32_t resGen;           /* what it says: the match whose result it has, */
     int res;                   /* ... and the result (RES_) */
+    int fighter;               /* (this modded copy) its fighter, the character id + 1 (0 none): from its ALIVE */
 } Member;
 
 /* How the first battle of a match ended, as a copy saw it. */
@@ -194,6 +214,8 @@ static struct {
     char names[LOBBY_SLOTS][NAMEB];
     uint32_t ownerId, myId;
     int battle, time, speed, roll, delay;
+    int stage1;                /* (this modded copy) the matches' stage + 1 (0: random) */
+    int fighter[LOBBY_SLOTS];  /* (a member: the owner's word) each place's fighter + 1 */
     int mode;                  /* 0 versus, 1 tournament */
     int entrants;              /* a tournament's player places (the Entrants rule, 2..8): places 0..entrants-1 */
     Tour t;
@@ -395,11 +417,13 @@ static void view_update(int force) {
         sView.ready[i] = sL.ready[i];
         sView.isOwner[i] = sL.ids[i] != 0 && sL.ids[i] == sL.ownerId;
         SDL_strlcpy(sView.name[i], sL.ids[i] != 0 ? sL.names[i] : "", LOBBY_NAME);
+        sView.fighter[i] = sL.ids[i] == 0 ? 0 : sL.on == 1 ? (sL.slot[i] == 0 ? Port_LobbyFighter() : sL.m[sL.slot[i]].fighter) : sL.fighter[i];
         if (sL.ids[i] != 0 && sL.ids[i] == sL.myId) {
             sView.me = i;
         }
     }
     sView.battle = sL.battle;
+    sView.stage = sL.stage1 - 1;
     sView.time = sL.time;
     sView.speed = sL.speed;
     sView.rollback = sL.roll;
@@ -453,6 +477,19 @@ static void view_update(int force) {
     sView.tourOn = sView.tour == 1 && sL.phase == 1 ? sL.t.playing : -1;
     sView.tourChamp = sView.tour == 2 ? sL.t.champ : -1;
     SDL_UnlockSpinlock(&sLock);
+}
+
+/* The lobby's stage for the match that is on (battle_load.c through Port_TestStage): every copy has the owner's word
+   of it before the match; -1 when none is set (the stage is chosen in the match as usual), and an added stage only
+   when both have the same mods (else the disc's game). */
+int Port_LobbyStage(void) {
+    extern int Port_NetSession(void);
+    extern int Port_NetModsHidden(void);
+    int st = sL.stage1 - 1;
+    if (sL.on == 0 || !Port_NetSession() || st < 0 || (st >= 36 && Port_NetModsHidden())) {
+        return -1;
+    }
+    return st;
 }
 
 int Port_LobbyView(PortLobbyView *out) {
@@ -664,7 +701,7 @@ static void tour_get(const uint8_t *p) {
 }
 
 static void state_send(int k) {
-    uint8_t p[STATE_BYTES];
+    uint8_t p[STATE_BYTES + 20]; /* (this modded copy: + each place's fighter and the stage, 620..639) */
     int s;
     memset(p, 0, sizeof(p));
     put(p, 0, MAGIC);
@@ -686,6 +723,13 @@ static void state_send(int k) {
     memcpy(p + 360, sL.code, 8);
     put(p, 92, sL.m[k].nonce); /* (the member's greeting's: how a member connecting knows this is its owner's answer) */
     tour_put(p);
+    for (s = 0; s < LOBBY_SLOTS; s++) {
+        int f = sL.ids[s] == 0 ? 0 : sL.slot[s] == 0 ? Port_LobbyFighter() : sL.m[sL.slot[s]].fighter;
+        p[STATE_BYTES + s * 2] = (uint8_t)(f & 0xFF);
+        p[STATE_BYTES + s * 2 + 1] = (uint8_t)(f >> 8);
+    }
+    p[STATE_BYTES + 16] = (uint8_t)(sL.stage1 & 0xFF);
+    p[STATE_BYTES + 17] = (uint8_t)(sL.stage1 >> 8);
     send_to(p, (int)sizeof(p), &sL.m[k].addr);
 }
 
@@ -1407,6 +1451,10 @@ static void owner_packet(const uint8_t *pkt, int n, const struct sockaddr_in *fr
             sL.m[k].resGen = get(pkt, 8);
             sL.m[k].res = (int)get(pkt, 9);
         }
+        if (n >= 44 && (int)get(pkt, 10) != sL.m[k].fighter && get(pkt, 10) <= 256) { /* (its fighter: to everyone) */
+            sL.m[k].fighter = (int)get(pkt, 10);
+            sL.dirty = 1;
+        }
         if (sL.phase == 1 && sL.m[k].inGen == sL.gen) {
             sL.m[k].wasIn = 1;
         }
@@ -1536,6 +1584,11 @@ static void owner_do(int what, int a, int b) {
                 }
                 /* (fewer: who sat in the places that are no longer the players' is a spectator there now) */
                 sL.entrants = (sL.entrants - 2 + b + (TOUR - 1)) % (TOUR - 1) + 2;
+            } else if (a == LOBBY_RULE_STAGE) { /* random, the disc's 35 stages, then the added ones (ids 36..) */
+                extern int gPortExtraStageCount;
+                int n = 1 + 35 + gPortExtraStageCount, cur = sL.stage1 == 0 ? 0 : sL.stage1 <= 35 ? sL.stage1 : sL.stage1 - 1;
+                cur = (cur + b + n) % n;
+                sL.stage1 = cur == 0 ? 0 : cur <= 35 ? cur : cur + 1; /* (id 35 is the select's Random: skipped) */
             } else if (a == LOBBY_RULE_BATTLE && sL.mode == 1) {
                 return; /* (a tournament's matches are single battles) */
             } else if (a == LOBBY_RULE_SPEED) {
@@ -1706,7 +1759,7 @@ static void hello_send(const struct sockaddr_in *to) {
 }
 
 static void alive_send(void) {
-    uint32_t p[10] = {MAGIC, T_L_ALIVE, sL.myId, sL.seqSeen, 0, sL.goGen, sL.inGen, 0, sL.resGen, (uint32_t)sL.res};
+    uint32_t p[11] = {MAGIC, T_L_ALIVE, sL.myId, sL.seqSeen, 0, sL.goGen, sL.inGen, 0, sL.resGen, (uint32_t)sL.res, (uint32_t)Port_LobbyFighter()};
     int s;
     for (s = 0; s < LOBBY_SLOTS; s++) {
         if (sL.ids[s] == sL.myId && sL.myId != 0) {
@@ -1824,6 +1877,16 @@ static void member_packet(const uint8_t *pkt, int n, const struct sockaddr_in *f
             sL.ready[s] = (int)get(pkt, 11 + s * 2);
             memcpy(sL.names[s], pkt + 104 + s * NAMEB, NAMEB);
             name_clean(sL.names[s], NAMEB);
+            if (n >= STATE_BYTES + 20) { /* (this modded copy: the fighters and the stage) */
+                int f = pkt[STATE_BYTES + s * 2] | pkt[STATE_BYTES + s * 2 + 1] << 8;
+                changed |= f != sL.fighter[s];
+                sL.fighter[s] = f;
+            }
+        }
+        if (n >= STATE_BYTES + 20) {
+            int st = pkt[STATE_BYTES + 16] | pkt[STATE_BYTES + 17] << 8;
+            changed |= st != sL.stage1;
+            sL.stage1 = st;
         }
         if (noteSeq != sL.noteSeq) {
             sL.noteSeq = noteSeq;

@@ -13,6 +13,7 @@
 
 char gPortStageNames[PORT_STAGE_MAX][64];
 int gPortExtraStageCount;
+extern int Port_NetModsHidden(void); /* gs/net.c: online, unless both players have the same mods */
 int gPortExtraStages[PORT_STAGE_MAX];
 
 typedef struct StageAlias {
@@ -77,7 +78,7 @@ extern void Res_RelocateOffsets(void *out, void *base, void *hdr); /* src/sys/gf
    pointers must reach them). The select calls Load when it has set up the disc's and Free when it ends. */
 void PortStageIcons_Free(void) {
     extern int Port_NetSession(void); /* gs/net.c */
-    if (Port_NetSession()) { /* (online: no added stage, and none of the game's memory taken; as PortChips_Free) */
+    if (Port_NetModsHidden()) { /* (online: no added stage, and none of the game's memory taken; as PortChips_Free) */
         return;
     }
     if (sIconMem != NULL) {
@@ -90,7 +91,7 @@ void PortStageIcons_Free(void) {
 void PortStageIcons_Load(void) {
     int i;
     extern int Port_NetSession(void); /* gs/net.c */
-    if (Port_NetSession()) {
+    if (Port_NetModsHidden()) {
         return;
     }
     PortStageIcons_Free();
@@ -112,7 +113,7 @@ void PortStageIcons_Load(void) {
 void *PortStageIcons_Get(int id) {
     extern int Port_NetSession(void); /* gs/net.c */
     int i = id - PORT_STAGE_FIRST;
-    return i >= 0 && i < gPortExtraStageCount && !Port_NetSession() ? sIconRes[i] : NULL;
+    return i >= 0 && i < gPortExtraStageCount && !Port_NetModsHidden() ? sIconRes[i] : NULL;
 }
 
 /* Adds one added stage: its next id, its display name, and the file aliases it needs. */
@@ -305,7 +306,7 @@ int Port_StageBufSize(void) {
     PortStages_Init();
     if (e != NULL) {
         size = strtol(e, NULL, 0);
-    } else if (!Port_NetSession() && sLargest > size) {
+    } else if (!Port_NetModsHidden() && sLargest > size) {
         size = sLargest;
     }
     if (size < PORT_STAGE_BUF_GAME) {
@@ -338,8 +339,9 @@ int Port_StageFits(const char *rel, long size) {
 /* BT3_TEST_STAGE=<id>: every battle is set up on that stage, whatever the menus chose (testing: a recorded
    session can then be played on any stage, an added one too: 0x24 is the first). -1 without it. */
 int Port_TestStage(void) {
+    extern int Port_LobbyStage(void); /* gs/net_lobby.c: a lobby's chosen stage (this modded copy), else -1 */
     const char *e = getenv("BT3_TEST_STAGE");
-    return e != NULL ? (int)strtol(e, NULL, 0) : -1;
+    return e != NULL ? (int)strtol(e, NULL, 0) : Port_LobbyStage();
 }
 
 /* BT3_TEST_SCREEN=<mode>: the same for the screen mode (0 one screen, 1 split): a two-player recording then

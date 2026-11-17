@@ -671,8 +671,9 @@ void TeamSel_Init(s32 section) {
         extern int gPortStageReplaceCount, gPortReplaceOld[16], gPortReplaceNew[16];
         extern int Port_NetSession(void); /* port/src/gs/net.c */
         static s32 sAllIds[96];
-        s32 extra = Port_NetSession() ? 0 : gPortExtraStageCount;
-        s32 swaps = Port_NetSession() ? 0 : gPortStageReplaceCount;
+        extern int Port_NetModsHidden(void); /* port/src/gs/net.c */
+        s32 extra = Port_NetModsHidden() ? 0 : gPortExtraStageCount;
+        s32 swaps = Port_NetModsHidden() ? 0 : gPortStageReplaceCount;
         s32 n = gTeamSel->stageCount, k, r;
         sPortStageRows = TS_STAGE_COLS;
         sPortStagesAdded = extra > 0 || swaps > 0;
