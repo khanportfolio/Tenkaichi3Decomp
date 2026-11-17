@@ -1,6 +1,7 @@
 /* Matchmaking with room codes (net_match.c), as the lobby in net.c uses it. */
 #ifndef NET_MATCH_H
 #define NET_MATCH_H
+#include <stddef.h>
 
 #define MATCH_ADDRS 4
 #define MATCH_WATCH_ADDRS 32 /* the spectators' addresses a host is told, all together */
@@ -38,6 +39,7 @@ void Match_Area(const char *area); /* a quick match: where to look ("auto", "any
 int Match_Watchers(char out[][64], int max, int *gen); /* the spectators' addresses ("seen=" too); *gen: changes */
 void Match_QueuesAsk(int version);
 void Match_HelloAsk(void);
+int Match_Post(const char *what, const char *json, char *out, size_t size); /* (this modded copy: friends, net_friends.c) */
 int Match_Release(int *min, int *latest);
 int Match_QueueWaiting(int queue);
 void Match_Poll(MatchStatus *out);

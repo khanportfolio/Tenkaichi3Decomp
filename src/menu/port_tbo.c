@@ -429,7 +429,7 @@ static char *Tb_Fmt(char *format) {
 }
 
 static char *sTbHubName[HUB_COUNT] = {"Quick Match", "Ranked Match", "Lobby", "Join", "Friends", "Tournament", "Replays", "Leaderboard", "Profile"};
-static const s32 sTbHubReady[HUB_COUNT] = {1, 0, 1, 1, 0, 0, 0, 0, 1};
+static const s32 sTbHubReady[HUB_COUNT] = {1, 0, 1, 1, 1, 1, 0, 1, 1}; /* (this modded copy: Friends, Tournament, Leaderboard) */
 static char *sTbHubSay[HUB_COUNT] = {
     "Fight whoever is searching right now! No time limit, and you can train while you wait.",
     "Fights that move your rank, season by season. That one is coming soon!",
@@ -934,6 +934,18 @@ static void Tb_HubUpdate(s32 live) {
     if (!live) {
         return;
     }
+    { /* (this modded copy) a friend's lobby or an invitation's, chosen in the Friends window: joined from here */
+        extern int PortFriends_JoinTake(char *out);
+        static char join[8];
+        if (PortFriends_JoinTake(join) && join[0] != 0) {
+            Ps_Copy(sTb->code, join, CODE_LEN + 1);
+            for (sTb->codeLen = 0; sTb->codeLen < CODE_LEN && sTb->code[sTb->codeLen] != 0; sTb->codeLen++) {
+            }
+            Snd_PlaySe(1, 1);
+            Tb_BeginSearch();
+            return;
+        }
+    }
     Ps_Move(&sTb->hubCur, HUB_COUNT);
     if (pad->gamePressed & PADG_CROSS) {
         switch (sTb->hubCur) {
@@ -960,6 +972,20 @@ static void Tb_HubUpdate(s32 live) {
             Snd_PlaySe(1, 1);
             sTb->prCur = 0;
             Tb_SetMode(TB_PROFILE);
+            break;
+        case HUB_FRIENDS: /* (this modded copy) the Friends window (port/src/gs/ui.cpp, the mouse) */
+        case HUB_LEADERBOARD: {
+            extern void PortFriends_Show(int tab);
+            Snd_PlaySe(1, 1);
+            PortFriends_Show(sTb->hubCur == HUB_FRIENDS ? 0 : 3);
+            Tb_Note(sTb->hubCur == HUB_FRIENDS ? "FRIENDS: THE WINDOW IS OPEN (USE THE MOUSE)" : "LEADERBOARD: THE WINDOW IS OPEN (USE THE MOUSE)");
+            break;
+        }
+        case HUB_TOURNAMENT: /* (this modded copy) a lobby, then its Mode rule: Tournament */
+            Snd_PlaySe(1, 1);
+            sTb->crCur = CR_OPEN;
+            Tb_SetMode(TB_CREATE);
+            Tb_Note("OPEN A LOBBY, THEN SET ITS MODE TO TOURNAMENT");
             break;
         default:
             Snd_PlaySe(1, 2);

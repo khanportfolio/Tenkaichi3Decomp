@@ -346,6 +346,11 @@ static int http_post(const char *what, const char *json, char *out, size_t size)
     return ok;
 }
 
+/* (this modded copy, 17 Nov 2026) A call of the service's for the friends list (net_friends.c): its answer's text. */
+int Match_Post(const char *what, const char *json, char *out, size_t size) {
+    return http_post(what, json, out, size);
+}
+
 /* What the window says when the service lets only official releases in (its REQUIRE_KEY) and refused this program:
    `plain` for a program without a key, or with one the service does not know. */
 static const char *key_refused(const char *answer, const char *plain) {

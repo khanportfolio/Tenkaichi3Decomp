@@ -20,6 +20,7 @@
 #include "../quit_dialog.h"
 #include "net_chat.h"
 #include "net_voice.h"
+#include "net_friends.h"
 #include "net_lobby.h"
 #include "net_update.h"
 
@@ -2996,6 +2997,290 @@ static bool chat_recent(void) {
     return n > 0 && PortChat_Line(n - 1, &l) && SDL_GetTicks() - l.atMs < CHAT_SHOWN_MS;
 }
 
+// (this modded copy, 17 Nov 2026) Kame House Arena: the Friends window (the Online menu's Friends and Leaderboard
+// open it) and an invitation's pop-up, from anywhere. net_friends.c talks to the service.
+extern "C" const char *Port_FighterNameEn(int chara); // fight_panels_ui.cpp
+
+static const char *rank_tier(int rating) {
+    return rating >= 1850 ? "Ultra Instinct" : rating >= 1700 ? "Super Saiyan Blue" : rating >= 1550 ? "Super Saiyan God"
+         : rating >= 1400 ? "Super Saiyan 3" : rating >= 1250 ? "Super Saiyan 2" : rating >= 1100 ? "Super Saiyan"
+         : rating >= 900 ? "Saiyan" : "Saibaman";
+}
+
+static const char *fighter_name(int idPlus1) {
+    const char *n = idPlus1 > 0 ? Port_FighterNameEn(idPlus1 - 1) : NULL;
+    return n != NULL ? n : "";
+}
+
+static void friends_draw(void) {
+    static PortFriendsView v;
+    static char addCode[16], dismissed[24], note[96], joining[8];
+    static unsigned noteSeen;
+    static uint64_t noteUntil;
+    static int boardAsked = -1;
+    ImGuiIO &io = ImGui::GetIO();
+    int tab = -1;
+    PortFriends_Tick();
+    bool show = PortFriends_Shown(&tab) != 0;
+    PortFriends_View(&v);
+    if (v.noteSeq != noteSeen) {
+        noteSeen = v.noteSeq;
+        SDL_strlcpy(note, v.note, sizeof(note));
+        noteUntil = SDL_GetTicks() + 5000;
+    }
+    // an invitation: a pop-up at the top, from anywhere
+    if (v.inviteCount > 0 && v.invites[0].ago < 170) {
+        char key[24];
+        snprintf(key, sizeof(key), "%s%s", v.invites[0].code, v.invites[0].lobby);
+        if (strcmp(key, dismissed) != 0) {
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, 10), ImGuiCond_Always, ImVec2(0.5f, 0));
+            ImGui::SetNextWindowBgAlpha(0.9f);
+            if (ImGui::Begin("##invite", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                                   ImGuiWindowFlags_NoFocusOnAppearing)) {
+                ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "%s invites you to a lobby", v.invites[0].name);
+                if (ImGui::Button("Join")) {
+                    PortFriends_JoinSet(v.invites[0].lobby);
+                    SDL_strlcpy(joining, v.invites[0].lobby, sizeof(joining));
+                    SDL_strlcpy(dismissed, key, sizeof(dismissed));
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Not now")) {
+                    SDL_strlcpy(dismissed, key, sizeof(dismissed));
+                }
+            }
+            ImGui::End();
+        }
+    }
+    if (joining[0] != '\0') { // (until the Online menu takes the code: port_tbo.c)
+        char left[8];
+        if (PortFriends_JoinTake(left)) {
+            PortFriends_JoinSet(left); // (put back: still waiting)
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, 10), ImGuiCond_Always, ImVec2(0.5f, 0));
+            ImGui::SetNextWindowBgAlpha(0.8f);
+            if (ImGui::Begin("##joining", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                                    ImGuiWindowFlags_NoFocusOnAppearing)) {
+                ImGui::Text("Open Online (Dragon Net Battle) to join lobby %s.", joining);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Cancel")) {
+                    joining[0] = '\0';
+                    PortFriends_JoinTake(left);
+                }
+            }
+            ImGui::End();
+        } else {
+            joining[0] = '\0';
+        }
+    }
+    if (!show) {
+        return;
+    }
+    ImGui::SetNextWindowSize(ImVec2(520, 440), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+    bool open = true;
+    if (ImGui::Begin("Kame House: Friends###kh_friends", &open, ImGuiWindowFlags_NoCollapse)) {
+        if (!v.known) {
+            ImGui::TextDisabled("Asking the service...");
+        } else {
+            ImGui::Text("Your friend code:");
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "%s", v.myCode);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Copy")) {
+                SDL_SetClipboardText(v.myCode);
+            }
+            ImGui::SameLine();
+            if (v.wins + v.losses > 0) {
+                ImGui::TextDisabled("  %s  %d  (%dW %dL, #%d)", rank_tier(v.rating), v.rating, v.wins, v.losses, v.place);
+            } else {
+                ImGui::TextDisabled("  Ranked: not played yet");
+            }
+        }
+        ImGui::SetNextItemWidth(140);
+        ImGui::InputTextWithHint("##addcode", "DBZ-XXXX", addCode, sizeof(addCode), ImGuiInputTextFlags_CharsUppercase);
+        ImGui::SameLine();
+        if (ImGui::Button("Add friend") && addCode[0] != '\0') {
+            PortFriends_Add(addCode);
+            addCode[0] = '\0';
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Refresh")) {
+            PortFriends_Refresh();
+        }
+        if (SDL_GetTicks() < noteUntil) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.5f, 1, 0.6f, 1), "%s", note);
+        }
+        PortLobbyView lv;
+        bool inLobby = Port_LobbyView(&lv) && lv.state == 2 && lv.code[0] != '\0';
+        int online = 0;
+        for (int i = 0; i < v.friendCount; i++) {
+            online += v.friends[i].online;
+        }
+        char label[64];
+        if (ImGui::BeginTabBar("##kh_tabs")) {
+            snprintf(label, sizeof(label), "Friends (%d online)###t0", online);
+            if (ImGui::BeginTabItem(label, NULL, tab == 0 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                if (v.friendCount == 0) {
+                    ImGui::TextWrapped("No friends yet. Give your friend code to a friend, or add theirs above. Players you met in a lobby are under Recent.");
+                }
+                for (int i = 0; i < v.friendCount; i++) {
+                    PortFriend *f = &v.friends[i];
+                    ImGui::PushID(i);
+                    ImGui::TextColored(f->online ? ImVec4(0.3f, 1, 0.4f, 1) : ImVec4(0.5f, 0.5f, 0.5f, 1), "%s", f->online ? "ONLINE " : "offline");
+                    ImGui::SameLine();
+                    ImGui::Text("%s", f->name);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s  %s", f->code, fighter_name(f->fighter));
+                    if (f->online && f->lobby[0] != '\0') {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "in lobby %s", f->lobby);
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Join")) {
+                            PortFriends_JoinSet(f->lobby);
+                            SDL_strlcpy(joining, f->lobby, sizeof(joining));
+                        }
+                    }
+                    if (f->online && inLobby && strcmp(f->lobby, lv.code) != 0) {
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Invite")) {
+                            PortFriends_Invite(f->code);
+                        }
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Remove")) {
+                        PortFriends_Remove(f->code);
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Recent players###t1", NULL, tab == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                if (v.recentCount == 0) {
+                    ImGui::TextWrapped("The players you meet in lobbies are listed here.");
+                }
+                for (int i = 0; i < v.recentCount; i++) {
+                    PortFriend *f = &v.recent[i];
+                    ImGui::PushID(100 + i);
+                    ImGui::TextColored(f->online ? ImVec4(0.3f, 1, 0.4f, 1) : ImVec4(0.5f, 0.5f, 0.5f, 1), "%s", f->online ? "ONLINE " : "offline");
+                    ImGui::SameLine();
+                    ImGui::Text("%s", f->name);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("%s  %s  %d min ago", f->code, fighter_name(f->fighter), f->ago / 60);
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Add friend")) {
+                        PortFriends_Add(f->code);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Block")) {
+                        PortFriends_Block(f->code, 1);
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndTabItem();
+            }
+            snprintf(label, sizeof(label), "Requests (%d)###t2", v.askCount);
+            if (ImGui::BeginTabItem(label, NULL, tab == 2 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                if (v.askCount + v.sentCount + v.blockCount == 0) {
+                    ImGui::TextDisabled("No requests.");
+                }
+                for (int i = 0; i < v.askCount; i++) {
+                    PortFriend *f = &v.asks[i];
+                    ImGui::PushID(200 + i);
+                    ImGui::Text("%s (%s) wants to be friends", f->name, f->code);
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Accept")) {
+                        PortFriends_Answer(f->code, 1);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Decline")) {
+                        PortFriends_Answer(f->code, 0);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Block")) {
+                        PortFriends_Block(f->code, 1);
+                    }
+                    ImGui::PopID();
+                }
+                for (int i = 0; i < v.sentCount; i++) {
+                    ImGui::TextDisabled("Sent to %s (%s): waiting for an answer", v.sent[i].name, v.sent[i].code);
+                }
+                if (v.blockCount > 0) {
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Blocked");
+                }
+                for (int i = 0; i < v.blockCount; i++) {
+                    ImGui::PushID(300 + i);
+                    ImGui::Text("%s (%s)", v.blocked[i].name, v.blocked[i].code);
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("Unblock")) {
+                        PortFriends_Block(v.blocked[i].code, 0);
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Leaderboard###t3", NULL, tab == 3 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                bool friendsOnly = v.boardFriends != 0;
+                if (boardAsked < 0) {
+                    PortFriends_Board(0);
+                    boardAsked = 0;
+                }
+                if (ImGui::RadioButton("Top 100", !friendsOnly)) {
+                    PortFriends_Board(0);
+                }
+                ImGui::SameLine();
+                if (ImGui::RadioButton("Friends", friendsOnly)) {
+                    PortFriends_Board(1);
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Refresh##board")) {
+                    PortFriends_Board(friendsOnly);
+                }
+                ImGui::TextDisabled("Ranked Match wins and losses move your rating (start 1000).");
+                if (ImGui::BeginTable("##board", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit)) {
+                    ImGui::TableSetupColumn("#");
+                    ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("Rank");
+                    ImGui::TableSetupColumn("Rating");
+                    ImGui::TableSetupColumn("W");
+                    ImGui::TableSetupColumn("L");
+                    ImGui::TableHeadersRow();
+                    for (int i = 0; i < v.boardCount; i++) {
+                        PortFriend *f = &v.board[i];
+                        bool mine = strcmp(f->code, v.myCode) == 0;
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%d", f->place);
+                        ImGui::TableNextColumn();
+                        if (mine) {
+                            ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1), "%s (you)", f->name);
+                        } else {
+                            ImGui::Text("%s", f->name);
+                        }
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%s", rank_tier(f->rating));
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%d", f->rating);
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%d", f->wins);
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%d", f->losses);
+                    }
+                    ImGui::EndTable();
+                }
+                ImGui::EndTabItem();
+            } else {
+                boardAsked = -1;
+            }
+            ImGui::EndTabBar();
+        }
+    }
+    ImGui::End();
+    if (!open) {
+        PortFriends_Hide();
+    }
+}
+
 static void chat_draw(void) {
     ImGuiIO &io = ImGui::GetIO();
     if (sChatSize < 0) {
@@ -3303,6 +3588,7 @@ static bool frame_build(void) {
     if (chat) {
         chat_draw();
     }
+    friends_draw();
     if (PortVoice_Shown()) { // the mic badge, top right, in an online match; Ctrl+M turns the mic on and off
         if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_M, false)) {
             PortVoice_MicSet(PortVoice_Mode() == VOICE_OFF);
