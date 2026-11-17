@@ -1882,7 +1882,7 @@ static void online_tab(void) {
     if (ImGui::Checkbox("Speaker on (hear the others)", &speaker)) {
         PortVoice_SpeakerSet(speaker);
     }
-    bool withMods = Port_Setting("net_mods", 0) != 0;
+    bool withMods = Port_Setting("net_mods", 1) != 0;
     if (ImGui::Checkbox("Online with my mods (Super characters)", &withMods)) {
         Port_SettingSave("net_mods", withMods);
         Port_SettingsWrite();

@@ -80,7 +80,8 @@ enum { TBO_ART_LIST(TBO_ART_ENUM) TBO_ART_COUNT };
 #define TBO_FIGHTER_BASE 0x300 /* + the fighter's id, 0..255 */
 #define TBO_STAGE_BASE 0x400   /* + the stage's id, 0..63 */
 #define TBO_LOBBY_BG 0x440
-#define TBO_EXTRA_COUNT 0x141
+#define TBO_FACE_BASE 0x441  /* + the fighter's id: its face, the select's chip (tbo/ui/faces/<id>.png) */
+#define TBO_EXTRA_COUNT 0x241
 #define TBO_LANG_BG 0x200
 #define TBO_LANG_ARROW_LEFT 0x201
 #define TBO_LANG_ARROW_RIGHT 0x202

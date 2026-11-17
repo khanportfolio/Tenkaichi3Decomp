@@ -560,7 +560,9 @@ static GsTex tbo_extra_texture(uint32_t id) {
     if (sExtraMissing[k]) return gsWhite;
     if (sExtraTex[k] != 0) return sExtraTex[k];
     if (sBackend->texSlotsLeft() <= 0) return gsWhite;
-    if (id >= TBO_LOBBY_BG) {
+    if (id >= TBO_FACE_BASE) {
+        snprintf(rel, sizeof(rel), "tbo/ui/faces/%03u.png", (unsigned)(id - TBO_FACE_BASE));
+    } else if (id >= TBO_LOBBY_BG) {
         snprintf(rel, sizeof(rel), "tbo/ui/lobby_bg.png");
     } else if (id >= TBO_STAGE_BASE) {
         snprintf(rel, sizeof(rel), "tbo/ui/stages/%03u.png", (unsigned)(id - TBO_STAGE_BASE));

@@ -2848,14 +2848,7 @@ static void Tb_DrawLobby(void) {
             Ps_Pill(TBO_KIT_GOLD, 51.0f, y - 1.0f, 77.0f, y + 23.0f, 0x80);
         }
         if (v->taken[i] && v->fighter[i] > 0) { /* (this modded copy) the place's fighter: its face */
-            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[i] - 1, 54.0f, y + 1.0f, 74.0f, y + 21.0f, 0.28f, 0.03f, 0.72f, 0.25f, PS_PLAIN, 0x80);
-        }
-    }
-    /* (this modded copy) the two players standing at the foot, as the character select shows them */
-    for (k = 0; k < 2; k++) {
-        if (v->taken[k] && v->fighter[k] > 0) {
-            f32 cx = k == 0 ? 330.0f : 452.0f, h = 128.0f, w = h * 0.5f;
-            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[k] - 1, cx - w * 0.5f, 444.0f - h, cx + w * 0.5f, 444.0f, k == 0 ? 0.0f : 1.0f, 0.0f, k == 0 ? 1.0f : 0.0f, 1.0f, PS_PLAIN, 0x80);
+            Ps_Sprite(TBO_FACE_BASE + v->fighter[i] - 1, 54.0f, y + 1.0f, 74.0f, y + 21.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
         }
     }
     Ps_Panel(TBO_KIT_WINDOW, LB_R0, 52.0f, LB_R1, 98.0f, 0x80);
@@ -2981,6 +2974,14 @@ static void Tb_DrawLobbyText(void) {
         Ps_Align(2);
         Ps_Text(LB_HX, Ps_TextTop(84.0f, 0.46f), v->phase ? "A MATCH IS ON" : v->tour == 1 ? "TOURNAMENT ON" : "TOURNAMENT OVER", 0.46f, 110.0f, v->tour == 2 && !v->phase ? 4 : 5);
         Ps_Align(0);
+    }
+    /* (this modded copy) the two players standing at the foot, as the character select shows them (17 Nov
+       2026: drawn here, after the message box, which had covered all but their hair) */
+    for (k = 0; k < 2; k++) {
+        if (v->taken[k] && v->fighter[k] > 0) {
+            f32 cx = k == 0 ? 330.0f : 452.0f, h = 128.0f, w = h * 0.5f;
+            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[k] - 1, cx - w * 0.5f, 444.0f - h, cx + w * 0.5f, 444.0f, k == 0 ? 0.0f : 1.0f, 0.0f, k == 0 ? 1.0f : 0.0f, 1.0f, PS_PLAIN, 0x80);
+        }
     }
     /* (this modded copy) VS between the two players standing at the foot */
     if (v->taken[0] && v->taken[1] && v->fighter[0] > 0 && v->fighter[1] > 0) {

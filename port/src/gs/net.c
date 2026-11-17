@@ -562,7 +562,7 @@ static unsigned long long mods_mine(void) {
 extern int Port_Setting(const char *name, int def); /* plat_settings.c */
 /* this side's number as sent: 0 (none) unless the player turned on "Online with my mods" */
 static unsigned long long mods_offer(void) {
-    return Port_Setting("net_mods", 0) ? mods_mine() : 0;
+    return Port_Setting("net_mods", 1) ? mods_mine() : 0;
 }
 /* (this modded copy, 17 Nov 2026) Ranked Match: a quick match in the queue R. Each greeting carries the player's
    friend code (the friends service's, net_friends.c) after the mods' mark; when the first battle ends each game

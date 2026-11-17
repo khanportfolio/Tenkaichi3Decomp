@@ -33,6 +33,7 @@ static struct {
     uint64_t heardMs;
 } sOut[SPEAKERS];
 static int sMode = -1, sSpeaker = -1;
+static uint64_t sNoSpeakerMs; /* (when opening the speaker last failed: tried again 10 s later) */
 static volatile int sWantClose;
 static volatile uint64_t sLiveMs, sSpokeMs;
 
@@ -219,6 +220,9 @@ void PortVoice_HeardFrom(uint32_t who, const uint8_t *in, int n) {
             old = i;
         }
     }
+    if (k < 0 && sNoSpeakerMs != 0 && SDL_GetTicks() - sNoSpeakerMs < 10000) {
+        return;
+    }
     if (k < 0) {
         k = k == -1 ? old : -2 - k; /* (none free: the one heard longest ago gives its stream) */
         if (sOut[k].s != NULL) {
@@ -226,10 +230,15 @@ void PortVoice_HeardFrom(uint32_t who, const uint8_t *in, int n) {
         }
         sOut[k].s = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
         sOut[k].who = who;
-        SDL_Log("bt3: voice: hearing %08x (%s)", (unsigned)who, sOut[k].s != NULL ? "played" : "no speaker");
         if (sOut[k].s == NULL) {
+            if (sNoSpeakerMs == 0) {
+                SDL_Log("bt3: voice: hearing %08x, but no speaker (%s)", (unsigned)who, SDL_GetError());
+            }
+            sNoSpeakerMs = SDL_GetTicks();
             return;
         }
+        sNoSpeakerMs = 0;
+        SDL_Log("bt3: voice: hearing %08x", (unsigned)who);
         SDL_ResumeAudioStreamDevice(sOut[k].s);
     }
     if (SDL_GetAudioStreamQueued(sOut[k].s) > RATE) { /* more than half a second behind: start again from now */
