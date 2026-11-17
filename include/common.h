@@ -6,6 +6,6 @@
 
 #define NULL 0
 
-#include "port/port_chara.h" /* characters added from outside the disc (PC build) */
+#include "port_chara.h" /* characters added from outside the disc (PC build) */
 
 #endif
