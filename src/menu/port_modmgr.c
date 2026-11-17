@@ -1038,6 +1038,268 @@ void Mm_ViewDraw(f32 cx, f32 feet, f32 height) {
     Mm_TexReset();
 }
 
+/* ---- the two fighters of the duel's character select, standing in 3D (17 Nov 2026) ----
+ * The user: "instead of images, the 3D player will be standing while selecting", every fighter (the disc's and the
+ * added ones). Player 1 is the viewer's own model, player 2 a second one read the same way into a buffer of its own
+ * and drawn by the same scene under the viewer's camera (as the forms screens' extras). Both play their stance (the
+ * breathing). The select's portrait shows until a side's model is in.
+ * Files: the select reads its portraits and its stage picture through the same queue, and a new request of either
+ * cancels what is being read. So they take turns: a model is read only while the select's loaders are idle
+ * (Mm_PairUpdate's filesFree) and the select's loaders wait while Mm_PairBusy (menu_c_e.c).
+ * Settings: select_3d (1; 0 the disc's portraits), sel3d_x / sel3d_feet / sel3d_h (player 1's feet and height, in
+ * the mockup's 1376 x 768 pixels; player 2 the same from the right). */
+#define MP_REST 10 /* frames a side rests on a fighter before its model is read (the cursor passing over is not) */
+typedef struct MmPair {
+    s32 open;
+    s32 started; /* the viewer's start-up read (its backdrop) has begun */
+    s32 ready;   /* ... and is done */
+    s32 want[2]; /* chara * 4 + costume, -1 none */
+    s32 rest[2];
+    s32 p2Shown; /* what player 2's model is (-1 none) */
+    s32 p2Reading;
+    s32 p2Obj;
+    f32 p2Base;
+    MmFile p2File[3];
+    u8 *p1Obj; /* the viewer's model last placed, and its height place (put back after it was hidden) */
+    f32 p1Y;
+    f32 p1Yaw;
+} MmPair;
+static MmPair sMp;
+extern s32 ChrView_CancelLoad(void);
+extern int Port_ModelSize(void); /* plat_charas.c: the largest model file */
+
+static s32 Mp_Setting(const char *name, s32 def) {
+    extern int Port_Setting(const char *name, int def);
+    return Port_Setting(name, def);
+}
+
+s32 Mm_PairOn(void) {
+    return Mp_Setting("select_3d", 1) != 0;
+}
+
+void Mm_PairOpen(void) {
+    memset(&sMp, 0, sizeof(sMp));
+    sMp.want[0] = -1;
+    sMp.want[1] = -1;
+    sMp.p2Shown = -1;
+    sMp.p2Obj = -1;
+    sMp.p1Yaw = MM_VIEW_YAW;
+    sMvShown = -1;
+    ChrView_PortInitAsync(); /* (only queues the backdrop's read: Mm_PairUpdate runs it in its turn) */
+    sMp.open = 1;
+}
+
+/* 1 while a read of the models' is going on (the select's loaders wait). */
+s32 Mm_PairBusy(void) {
+    if (!sMp.open) {
+        return 0;
+    }
+    return (sMp.started && !sMp.ready) || (sMp.ready && ChrView_IsLoading()) || sMp.p2Reading;
+}
+
+void Mm_PairClose(void) {
+    if (!sMp.open) {
+        return;
+    }
+    if (sMp.p2Reading) {
+        File_CancelRequests();
+        sMp.p2Reading = 0;
+    }
+    if (sMp.p2Obj >= 0) {
+        BtlObj_Destroy(sMp.p2Obj);
+        sMp.p2Obj = -1;
+    }
+    if (sMp.ready) {
+        if (ChrView_IsLoading()) {
+            ChrView_CancelLoad();
+        }
+        ChrView_Hide();
+    } else if (sMp.started) {
+        File_CancelRequests();
+    }
+    Job_Clear();
+    ChrView_PortTermKeepMusic(); /* (the character select's music goes on) */
+    if (sMp.p2File[0].buf != NULL) {
+        Heap_Free(sMp.p2File[0].buf);
+        sMp.p2File[0].buf = NULL;
+    }
+    sMvShown = -1;
+    sMp.open = 0;
+}
+
+static void Mp_P2Drop(void) {
+    if (sMp.p2Obj >= 0) {
+        BtlObj_Destroy(sMp.p2Obj);
+        sMp.p2Obj = -1;
+    }
+    sMp.p2Shown = -1;
+}
+
+/* Each frame: what each side shows (chara * 4 + costume, -1 none), and whether the select's own reads are idle. */
+void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
+    s32 k;
+    s32 w[2];
+
+    if (!sMp.open) {
+        return;
+    }
+    w[0] = want0;
+    w[1] = want1;
+    for (k = 0; k < 2; k++) {
+        if (w[k] != sMp.want[k]) {
+            sMp.want[k] = w[k];
+            sMp.rest[k] = 0;
+        } else if (sMp.rest[k] < 10000) {
+            sMp.rest[k]++;
+        }
+    }
+    if (!Mm_PairBusy() && !filesFree) {
+        return; /* (the select's turn) */
+    }
+    if (!sMp.ready) { /* the viewer's backdrop */
+        sMp.started = 1;
+        sMp.ready = ChrView_PortInitDone();
+        return;
+    }
+    Job_Run(); /* (player 1's read, when there is one) */
+    if (ChrView_IsLoading()) {
+        return;
+    }
+    if (sMp.p2Reading) {
+        if (File_UpdateRequests() != 0) {
+            u8 *o;
+
+            sMp.p2Reading = 0;
+            sMp.p2Obj = BtlObj_Create(3, sMp.p2File, 1);
+            o = BtlObj_Get(sMp.p2Obj);
+            if (o != NULL) {
+                f32 *m = (f32 *)(o + 0x9A0);
+
+                BtlObjAnim_PlayModel(o, 7, 2); /* (the stance) */
+                *(u32 *)(o + 0xA40) &= ~0x02000000;
+                sMp.p2Base = sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+            }
+        }
+        return;
+    }
+    /* player 1 first: the viewer's model */
+    if (sMp.want[0] >= 0 && sMp.want[0] != sMvShown && sMp.rest[0] >= MP_REST) {
+        sMvChara = sMp.want[0] / 4;
+        sMvShown = sMp.want[0];
+        ChrView_Show(sMvChara, sMp.want[0] % 4, 0);
+        Job_Run(); /* (its job starts: the viewer counts as loading from now) */
+        return;
+    }
+    if (sMp.want[0] >= 0 && sMp.want[0] != sMvShown) {
+        return; /* (player 1 still resting: player 2 waits for it) */
+    }
+    /* then player 2 */
+    if (sMp.want[1] != sMp.p2Shown && sMp.rest[1] >= MP_REST) {
+        s32 chara = sMp.want[1] / 4;
+
+        Mp_P2Drop();
+        if (sMp.want[1] < 0) {
+            return;
+        }
+        if (sMp.p2File[0].buf == NULL) {
+            sMp.p2File[0].buf = Heap_Alloc(Port_ModelSize(), 0x40, 0, 2);
+        }
+        sMp.p2Shown = sMp.want[1];
+        if (sMp.p2File[0].buf == NULL) {
+            return; /* (no room: its portrait stays) */
+        }
+        sMp.p2File[0].size = 0;
+        sMp.p2File[0].id = -1;
+        *(s32 *)sMp.p2File[0].buf = 0;
+        BtlRes_LoadSingle(0, sMp.p2File, ChrView_GetModelFile(chara, sMp.want[1] % 4, 0));
+        sMp.p2Reading = 1;
+    }
+}
+
+/* Draws the two (before the select's movies, so its plates and chips are over them); says which side has its model
+   standing (its portrait is then not drawn). */
+void Mm_PairDraw(s32 *ready0, s32 *ready1) {
+    MmCharaInfo *ci;
+    u8 *obj;
+    u8 *o2;
+    f32 place[3];
+    f32 dist;
+    f32 fy;
+    f32 hf;
+    s32 p1ok;
+    s32 p2ok;
+
+    *ready0 = 0;
+    *ready1 = 0;
+    if (!sMp.open || !sMp.ready || !ChrView_IsVisible() || gChrView->cur == NULL) {
+        return;
+    }
+    ci = ChrView_GetCharaInfo((u32)sMvChara);
+    if (ci == NULL) {
+        return;
+    }
+    Mx_Begin();
+    obj = BtlObj_Get(gChrView->cur->obj);
+    if (obj != sMp.p1Obj) {
+        sMp.p1Obj = obj;
+        sMp.p1Y = 0.0f;
+        if (obj != NULL) {
+            sMp.p1Y = *(f32 *)(obj + 0x954);
+        }
+    }
+    p1ok = obj != NULL && !ChrView_IsLoading() && sMp.want[0] >= 0 && sMvShown == sMp.want[0];
+    place[0] = (f32)Mp_Setting("sel3d_x", 330);
+    place[1] = (f32)Mp_Setting("sel3d_feet", 640);
+    place[2] = (f32)Mp_Setting("sel3d_h", 470);
+    Mm_PlaceModel(ci, obj, place, &sMp.p1Yaw, 0, &dist, &fy, &hf);
+    if (obj != NULL) { /* (a model of another fighter, still there while the next is read: out of sight) */
+        f32 y = p1ok ? sMp.p1Y : -10000.0f;
+
+        *(f32 *)(obj + 0x954) = y;
+        ((f32 *)(obj + 0x9A0))[13] = y;
+    }
+    o2 = NULL;
+    if (sMp.p2Obj >= 0) {
+        o2 = BtlObj_Get(sMp.p2Obj);
+    }
+    p2ok = o2 != NULL && !sMp.p2Reading && sMp.p2Shown == sMp.want[1];
+    if (o2 != NULL) { /* player 2: as the extras are placed, the other way round */
+        f32 *m = (f32 *)(o2 + 0x9A0);
+        f32 narrow = 1333.0f / (f32)Port_PageAspectMilli();
+        f32 s = sMp.p2Base * Mx_SizeFracY(place[2]) / (hf > 0.01f ? hf : 0.01f);
+        f32 ox = -(Mx_ScreenFracX(MX_W - place[0]) - 0.492f) / 0.76f * dist;
+        f32 oy = (Mx_ScreenFracY(place[1]) + Mx_SizeFracY(24.0f) - fy) / 1.115f * dist;
+        f32 yaw = 6.2831853f - MM_VIEW_YAW;
+        f32 c = cosf(yaw);
+        f32 sn = sinf(yaw);
+
+        if (!p2ok) {
+            oy = -10000.0f;
+        }
+        *(f32 *)(o2 + 0x964) = yaw;
+        *(f32 *)(o2 + 0x950) = ox;
+        *(f32 *)(o2 + 0x954) = oy;
+        m[0] = c * s * narrow;
+        m[1] = 0.0f;
+        m[2] = -sn * s;
+        m[4] = 0.0f;
+        m[5] = s;
+        m[6] = 0.0f;
+        m[8] = sn * s * narrow;
+        m[9] = 0.0f;
+        m[10] = c * s;
+        m[12] = ox;
+        m[13] = oy;
+    }
+    if (!p1ok && !p2ok) {
+        return;
+    }
+    Mm_Scene();
+    Mm_TexReset();
+    *ready0 = p1ok;
+    *ready1 = p2ok;
+}
+
 /* ---- the screen ----
  * Laid out as the approved mockups (modmgr_design/mockups/01_library.jpg and on), in their pixels (port_mmkit.c). */
 

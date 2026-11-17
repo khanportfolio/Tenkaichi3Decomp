@@ -26,6 +26,16 @@ extern volatile int gUiSongIdx, gUiSongReady, gUiSongLit;
 #endif
 #ifdef PORT
 extern void Port_MenuPage(int screen); /* port/src/gs_marker.c: widescreen menus */
+/* (17 Nov 2026) the two fighters standing in 3D in place of the portraits (src/menu/port_modmgr.c, Mm_Pair*) */
+extern s32 Mm_PairOn(void);
+extern void Mm_PairOpen(void);
+extern void Mm_PairClose(void);
+extern s32 Mm_PairBusy(void);
+extern void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree);
+extern void Mm_PairDraw(s32 *ready0, s32 *ready1);
+extern int Port_NetSession(void);
+static s32 sPort3D;          /* on for this select (not online: the two copies' loaders keep the same pace) */
+static s32 sPort3DReady[2];  /* the side's model stands: its portrait is not drawn */
 extern void Port_MenuFill(int on);
 extern void Port_MenuMovie(int index);
 #endif
@@ -215,6 +225,11 @@ void CharSel_SetFormChips(s32 side) {
 void CharSel_UpdateFaceLoad(void) {
     MTexRes *res;
 
+#ifdef PORT
+    if (sPort3D && Mm_PairBusy()) {
+        return; /* (a model is being read: the queue is its) */
+    }
+#endif
     switch (gCharSel->faceState) {
     case CHARSEL_LOAD_ABORT:
         if (gCharSel->side[gCharSel->faceSide ^ 1]->flags & CHARSEL_SIDE_FACE_CHANGE) {
@@ -287,6 +302,11 @@ void CharSel_RequestFace(s32 side) {
 void CharSel_UpdateStageLoad(void) {
     MTexRes *res;
 
+#ifdef PORT
+    if (sPort3D && Mm_PairBusy()) {
+        return;
+    }
+#endif
     switch (gCharSel->stageState) {
     case CHARSEL_LOAD_ABORT:
         gCharSel->stageState = CHARSEL_LOAD_RESTART;
@@ -792,6 +812,14 @@ void CharSel_Init(s32 section) {
     gCharSel->bgAlpha[0] = 0x80;
     gCharSel->bgAlpha[1] = 0;
     gCharSel->stageBuf = 1;
+#ifdef PORT
+    sPort3D = Mm_PairOn() && !Port_NetSession();
+    sPort3DReady[0] = 0;
+    sPort3DReady[1] = 0;
+    if (sPort3D) {
+        Mm_PairOpen();
+    }
+#endif
 
     if (gCharSel->bgmIds[gCharSel->stage->bgmPlaying] == CHARSEL_BGM_RANDOM) {
         Bgm_Play(CHARSEL_BGM_RANDOM_FIRST + Rand_Range(9));
@@ -813,6 +841,10 @@ void CharSel_Term(void) {
 #ifdef PORT
     gUiNameIdx = -1; /* drop the port's name overlays */
     gUiSongIdx = -1;
+    if (sPort3D) {
+        Mm_PairClose();
+        sPort3D = 0;
+    }
 #endif
     IconWin_Term();
     ItemHelp_Term();
@@ -868,6 +900,34 @@ void CharSel_Term(void) {
 
 /* Draws the screen: the stage picture cross fade, then the labels, texture rectangles and visibility of every
    clip of the five movies are set from the state, the movies are drawn, then the windows and the side panels. */
+#ifdef PORT
+/* The two fighters in 3D: each side's fighter (in its costume once that is being chosen), read when the select's
+   own reads are idle, drawn before the movies. */
+static void CharSel_Port3D(void) {
+    s32 i;
+    s32 want[2];
+
+    sPort3DReady[0] = 0;
+    sPort3DReady[1] = 0;
+    if (!sPort3D) {
+        return;
+    }
+    for (i = 0; i < CHARSEL_SIDES && i < 2; i++) {
+        CharSelSide *s = gCharSel->side[i];
+        s32 c = s->chara;
+
+        want[i] = -1;
+        if (c >= 0 && (c < 161 || PORT_CHARA_ADDED(c))) { /* (161: the disc's fighters; not the random cell) */
+            want[i] = c * 4 + (s->state == CHARSEL_ST_COLOR || s->state == CHARSEL_ST_DONE ? (s->colorPlate & 3) : 0);
+        }
+    }
+    Mm_PairUpdate(want[0], want[1], gCharSel->faceState == CHARSEL_LOAD_IDLE && gCharSel->stageState == CHARSEL_LOAD_IDLE &&
+                                        !(gCharSel->side[0]->flags & CHARSEL_SIDE_FACE_CHANGE) &&
+                                        !(gCharSel->side[1]->flags & CHARSEL_SIDE_FACE_CHANGE));
+    Mm_PairDraw(&sPort3DReady[0], &sPort3DReady[1]);
+}
+#endif
+
 void CharSel_Draw(void) {
     MFlashRef ref;
     MFlashUv uv;
@@ -917,6 +977,7 @@ void CharSel_Draw(void) {
     }
 #ifdef PORT
     Port_MenuPage(3); /* (also when the first picture was left out above) */
+    CharSel_Port3D();
 #endif
 
     f = &gCharSel->flash[0];
@@ -936,7 +997,11 @@ void CharSel_Draw(void) {
             gCharSel->faceAlpha[i] = 0.0f;
         }
         Flash_FindLabel(f, NULL, i ? "mc_single_chara_r" : "mc_single_chara_l", &ref);
+#ifdef PORT
+        Flash_ClipSetAlpha(f, &ref, sPort3DReady[i] ? 0.0f : gCharSel->faceAlpha[i]); /* (its 3D model stands there) */
+#else
         Flash_ClipSetAlpha(f, &ref, gCharSel->faceAlpha[i]);
+#endif
         Flash_ClipSetFlags(f, &ref, 0x80, (u8)gCharSel->faceMask);
         Flash_FindLabel(f, NULL, i ? "mc_name_text_r" : "mc_name_text_l", &ref);
         TextBox_AttachLine(f, &ref, 0, 0, CS_NAME_LINE(gCharSel->side[i]->chara), &gCharSel->nameBox[i]);
@@ -1339,7 +1404,14 @@ static s32 CharSel_PortGrid(s32 pad, s32 n) {
     s32 c;
     s32 f;
 
-    if (!PortModGrid_Pick(pad, &id, &costume)) {
+    if (sPort3D) {
+        Mm_PairClose(); /* (the grid uses the viewer: opened again after it) */
+    }
+    r = PortModGrid_Pick(pad, &id, &costume);
+    if (sPort3D) {
+        Mm_PairOpen();
+    }
+    if (!r) {
         return 0;
     }
     for (r = 0; r < gCharSel->rows[n]; r++) {
