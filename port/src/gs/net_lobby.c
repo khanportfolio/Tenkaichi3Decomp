@@ -88,10 +88,11 @@
 #include "net_lobby.h"
 #include "net_match.h"
 #include "net_relay.h"
+#include "net_voice.h"
 
 #define MAGIC 0x4E335442u
 enum { T_HELLO = 1, T_HELLO_ACK = 2, T_SPEC_HELLO = 20, T_SPEC_NO = 22, SPEC_NO_VERSION = 1 };
-enum { T_L_HELLO = 30, T_L_NO, T_L_STATE, T_L_ALIVE, T_L_GO, T_L_BACK, T_L_LEAVE, T_L_CLOSE, T_L_CHAT, T_L_SAID, T_L_INVITE, T_L_TOKEN };
+enum { T_L_HELLO = 30, T_L_NO, T_L_STATE, T_L_ALIVE, T_L_GO, T_L_BACK, T_L_LEAVE, T_L_CLOSE, T_L_CHAT, T_L_SAID, T_L_INVITE, T_L_TOKEN, T_L_VOICE /* (this modded copy: a member's voice, net_voice.c) */ };
 enum { LOBBY_VERSION = 3, /* 2: STATE carries the member's nonce (its greeting's), which a member connecting asks for; 3: tournaments (the bracket in STATE, results in ALIVE, the rejoin token in HELLO, TOKEN) */ FP_MARK = 0x46505231, LOBBY_CAP = 0x4C4F4231 /* "1BOL": a game's 1v1 greeting says it knows lobbies */ };
 enum { LNO_VERSION = 1, LNO_DATA = 2, LNO_FULL = 3 };
 enum { CLOSE_CLOSED = 1, CLOSE_KICKED = 2 };
@@ -421,6 +422,7 @@ static void view_update(int force) {
         if (sL.ids[i] != 0 && sL.ids[i] == sL.myId) {
             sView.me = i;
         }
+        sView.talking[i] = sL.ids[i] == 0 ? 0 : PortVoice_Talking(sL.ids[i] == sL.myId ? 0 : sL.ids[i]);
     }
     sView.battle = sL.battle;
     sView.stage = sL.stage1 - 1;
@@ -1430,6 +1432,51 @@ static void owner_hello(const uint8_t *pkt, int n, const struct sockaddr_in *fro
 static void owner_say(int k, const char *text);
 
 /* The owner: a packet of a member. */
+/* (this modded copy, 17 Nov 2026) Voice in the lobby: each member sends its microphone's 20 ms packets to the owner
+   (T_L_VOICE: magic, type, the speaker's id, the length, then the mu-law bytes); the owner plays them and passes
+   them on to every other member, and sends its own to all. Not while a match's session is on (its own voice). */
+static void voice_send(uint32_t who, const uint8_t *v, int len, int skip) {
+    uint8_t p[16 + VOICE_FRAME];
+    int j;
+    if (len <= 0 || len > VOICE_FRAME) {
+        return;
+    }
+    put(p, 0, MAGIC);
+    put(p, 1, T_L_VOICE);
+    put(p, 2, who);
+    put(p, 3, (uint32_t)len);
+    memcpy(p + 16, v, (size_t)len);
+    if (sL.on == 2) {
+        send_to(p, 16 + len, &sL.owner);
+        return;
+    }
+    for (j = 1; j < LOBBY_SLOTS; j++) {
+        if (sL.m[j].on && j != skip) {
+            send_to(p, 16 + len, &sL.m[j].addr);
+        }
+    }
+}
+
+static void voice_pass(int k, const uint8_t *v, int len) {
+    if (NetIo_SessionMode() != 0 || len > VOICE_FRAME) {
+        return;
+    }
+    PortVoice_HeardFrom(sL.m[k].id, v, len);
+    voice_send(sL.m[k].id, v, len, k);
+}
+
+static void voice_tick(void) {
+    uint8_t v[VOICE_FRAME];
+    int i, len;
+    if (sL.on == 0 || (sL.on == 2 && sL.state != 2) || NetIo_SessionMode() != 0) {
+        return;
+    }
+    PortVoice_Live();
+    for (i = 0; i < 4 && (len = PortVoice_Outgoing(v)) > 0; i++) {
+        voice_send(sL.myId, v, len, 0);
+    }
+}
+
 static void owner_packet(const uint8_t *pkt, int n, const struct sockaddr_in *from, uint32_t type) {
     int k;
     if (type == T_L_HELLO) {
@@ -1465,6 +1512,8 @@ static void owner_packet(const uint8_t *pkt, int n, const struct sockaddr_in *fr
             }
             sL.dirty = 1;
         }
+    } else if (type == T_L_VOICE && n > 16) {
+        voice_pass(k, pkt + 16, n - 16);
     } else if (type == T_L_LEAVE) {
         member_drop(k, "left the lobby", 0);
     } else if (type == T_L_CHAT && n >= 20) {
@@ -1853,6 +1902,12 @@ static void member_packet(const uint8_t *pkt, int n, const struct sockaddr_in *f
         return;
     }
     sL.heardNs = now_ns();
+    if (type == T_L_VOICE) { /* (this modded copy: a member's voice, passed on by the owner) */
+        if (n > 16 && get(pkt, 2) != sL.myId && NetIo_SessionMode() == 0) {
+            PortVoice_HeardFrom(get(pkt, 2), pkt + 16, n - 16);
+        }
+        return;
+    }
     if (type == T_L_STATE && n >= STATE_BYTES) {
         uint32_t seq = get(pkt, 2), r = get(pkt, 7), o = get(pkt, 8), noteSeq = get(pkt, 9);
         int s, changed = 0;
@@ -2015,6 +2070,9 @@ static void member_say(const char *text) {
 static void lobby_off(void) {
     int was = sL.on;
     sL.on = 0;
+    if (NetIo_SessionMode() == 0) {
+        PortVoice_Reset(); /* (the microphone and the speakers closed) */
+    }
     sL.state = sL.error[0] != '\0' ? 3 : 0;
     if (was == 1 && sL.byCode) {
         Match_Cancel(); /* (the room is given up) */
@@ -2820,6 +2878,7 @@ void Lobby_Pump(void) {
             }
         }
     }
+    voice_tick();
     timers();
 }
 

@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-enum { T_LOBBY_FIRST = 30, T_LOBBY_LAST = 41 }; /* the lobby's packet types (net_lobby.c); a release without lobbies ignores them */
+enum { T_LOBBY_FIRST = 30, T_LOBBY_LAST = 42 }; /* the lobby's packet types (net_lobby.c); a release without lobbies ignores them */
 
 #ifndef __cplusplus
 struct sockaddr_in;
@@ -73,6 +73,7 @@ typedef struct PortLobbyView {
     char name[LOBBY_SLOTS][LOBBY_NAME];
     int fighter[LOBBY_SLOTS];    /* (this modded copy) each place's fighter, the character id + 1 (0: none chosen) */
     int stage;                  /* (this modded copy) the stage of the lobby's matches: -1 random, else its id */
+    int talking[LOBBY_SLOTS];   /* (this modded copy) the place's voice is heard now (its own microphone: this copy's) */
     int battle, time, speed, rollback, delay; /* the rules: battle 0..4 (single, team, DP 10/15/20), time 0..4, speed %,
                                                  rollback frames 0..8, delay 0 automatic else frames + 1 */
     char note[128];             /* the last thing that happened ("X left the lobby") */

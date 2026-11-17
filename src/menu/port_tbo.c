@@ -1885,10 +1885,13 @@ static void Tb_DrawProfileText(void) {
    owner starts a match every copy goes into it from here, and comes back here when it ends (the game is put back to
    this moment: gs/state.c). */
 #define LB_ROWS 8
-#define LB_RULES 8 /* (this modded copy: + Stage and My Fighter) */
-#define LB_BTN 8 /* the right side's items: the rules 0..7 (the mode first), then the buttons 8..11 (two rows of two) */
-#define LB_RIGHT_COUNT 12
+#define LB_RULES 9 /* (this modded copy: + Stage, My Fighter and Mic / Speaker) */
+#define LB_BTN 9 /* the right side's items: the rules 0..8 (the mode first), then the buttons 9..12 (two rows of two) */
+#define LB_RIGHT_COUNT 13
+#define LB_MINE 7 /* (this modded copy) the first of the rows every member sets for itself (My Fighter, Mic / Speaker) */
 #define TB_RULE_FIGHTER 100 /* (not a lobby rule: this player's own fighter, Port_LobbyFighterSet) */
+#define TB_RULE_VOICE 101   /* (not a lobby rule: this player's mic and speaker, net_voice.c) */
+#define LB_HX (sTbLv.stage >= 0 ? 424.0f : 490.0f) /* (this modded copy) the code panel's right texts: left of the map card */
 #define LB_POP_MEMBER 1
 #define LB_POP_LEAVE 2
 #define LB_POP_CALLOFF 3 /* the owner switches a lobby with a tournament on back to Versus: called off first */
@@ -1900,11 +1903,16 @@ static void Tb_DrawProfileText(void) {
 
 
 static char *sTbBattleName[5] = {"SINGLE BATTLE", "TEAM BATTLE", "DP BATTLE: 10 DP", "DP BATTLE: 15 DP", "DP BATTLE: 20 DP"};
-static char *sTbRuleName[LB_RULES] = {"Mode", "Battle", "Time Limit", "Game Speed", "Rollback", "Input Delay", "Stage", "My Fighter"};
+static char *sTbRuleName[LB_RULES] = {"Mode", "Battle", "Time Limit", "Game Speed", "Rollback", "Input Delay", "Stage", "My Fighter", "Mic / Speaker"};
 /* The rule of the page's row i (the mode first, then the lobby's own in their order: LOBBY_RULE_). In Tournament
    the battle's row is the Entrants rule (a tournament's matches are single battles). */
 static s32 Tb_LbRule(s32 i) {
-    return i == 0 ? LOBBY_RULE_MODE : i == 1 && sTbLv.mode ? LOBBY_RULE_ENTRANTS : i == 6 ? LOBBY_RULE_STAGE : i == 7 ? TB_RULE_FIGHTER : i - 1;
+    return i == 0 ? LOBBY_RULE_MODE : i == 1 && sTbLv.mode ? LOBBY_RULE_ENTRANTS : i == 6 ? LOBBY_RULE_STAGE : i == 7 ? TB_RULE_FIGHTER : i == 8 ? TB_RULE_VOICE : i - 1;
+}
+
+/* (this modded copy) A row this player sets for itself, the owner or not. */
+static s32 Tb_RowMine(s32 i) {
+    return i >= LB_MINE && i < LB_RULES;
 }
 
 static char *Tb_RuleName(s32 i) {
@@ -2086,16 +2094,31 @@ static void Tb_RuleValue(char *out, s32 i) {
         break;
     case LOBBY_RULE_STAGE: {
         extern const char *Port_StageNameEn(int stage); /* gs/fight_panels_ui.cpp */
-        const char *nm = v->stage < 0 ? NULL : Port_StageNameEn(v->stage);
-        Ps_Copy(out, v->stage < 0 ? "PLAYERS CHOOSE" : nm != NULL ? nm : "STAGE", 40);
+        const char *nm = v->stage < 0 ? 0 : Port_StageNameEn(v->stage);
+        if (nm != NULL) { /* (not `?:` between a name and a literal: the 32-bit pointers) */
+            Ps_Copy(out, (char *)nm, 40);
+        } else {
+            Ps_Copy(out, v->stage < 0 ? "PLAYERS CHOOSE" : "STAGE", 40);
+        }
         break;
     }
     case TB_RULE_FIGHTER: {
         extern const char *Port_FighterNameEn(int chara); /* gs/fight_panels_ui.cpp */
         extern int Port_LobbyFighter(void);
         int f = Port_LobbyFighter() - 1;
-        const char *nm = f < 0 ? NULL : Port_FighterNameEn(f);
-        Ps_Copy(out, nm != NULL ? nm : "NONE", 40);
+        const char *nm = f < 0 ? 0 : Port_FighterNameEn(f);
+        if (nm != NULL) { /* (not `?:` between a name and a literal: the 32-bit pointers) */
+            Ps_Copy(out, (char *)nm, 40);
+        } else {
+            Ps_Copy(out, "NONE", 40);
+        }
+        break;
+    }
+    case TB_RULE_VOICE: {
+        extern int PortVoice_Mode(void);
+        extern int PortVoice_SpeakerOn(void);
+        int m = PortVoice_Mode();
+        sprintf(out, Tb_Fmt("%s / %s"), m == 1 ? "ON" : m == 2 ? "HOLD V" : "OFF", PortVoice_SpeakerOn() ? "ON" : "OFF");
         break;
     }
     default:
@@ -2422,7 +2445,7 @@ static void Tb_LobbyPopUpdate(void) {
 
 /* Up (-1) and down (1) on the right side: the rules (the owner's), then the two rows of buttons, and round. */
 static s32 Tb_LobbyNext(s32 r, s32 dir) {
-    s32 owner = sTbLv.owner;
+    s32 first = sTbLv.owner ? 0 : LB_MINE; /* (this modded copy: a member sets its own rows) */
     s32 row1 = Tb_LobbyAct(2) != 0; /* (a second row of buttons) */
 
     if (dir > 0) {
@@ -2430,18 +2453,18 @@ static s32 Tb_LobbyNext(s32 r, s32 dir) {
             return r + 1; /* (the last rule: to the first button) */
         }
         if (r < LB_BTN + 2) {
-            return row1 ? (Tb_LobbyAct(r - LB_BTN + 2) != 0 ? r + 2 : LB_BTN + 2) : owner ? 0 : r;
+            return row1 ? (Tb_LobbyAct(r - LB_BTN + 2) != 0 ? r + 2 : LB_BTN + 2) : first;
         }
-        return owner ? 0 : r - 2;
+        return first;
     }
-    if (r == 0) {
+    if (r <= first) {
         return row1 ? LB_BTN + 2 : LB_BTN;
     }
     if (r < LB_BTN) {
         return r - 1;
     }
     if (r < LB_BTN + 2) {
-        return owner ? LB_BTN - 1 : row1 ? LB_BTN + 2 : r;
+        return LB_BTN - 1;
     }
     return LB_BTN;
 }
@@ -2538,7 +2561,7 @@ static void Tb_LobbyUpdate(s32 live) {
         Ps_Prompt(0, "Move Here");
         Ps_Prompt(2, "Cancel");
     } else {
-        if (sTb->lbCol == 1 && sTb->lbRight < LB_BTN && own) {
+        if (sTb->lbCol == 1 && sTb->lbRight < LB_BTN && (own || Tb_RowMine(sTb->lbRight))) {
             Ps_Prompt(3, "Change");
         }
         Ps_Prompt(0, "Enter");
@@ -2555,7 +2578,7 @@ static void Tb_LobbyUpdate(s32 live) {
     if (!live) {
         return;
     }
-    if (!v->owner && sTb->lbRight < LB_BTN) {
+    if (!v->owner && sTb->lbRight < LB_MINE) {
         sTb->lbRight = LB_BTN;
     }
     if (pad->gamePressed & (PADG_L1 | PADG_R1)) { /* the shoulder buttons: the other side of the page */
@@ -2589,6 +2612,23 @@ static void Tb_LobbyUpdate(s32 live) {
             cur = f < 0 ? 0 : f < 161 ? f : f >= 198 && f < 198 + added ? 161 + (f - 198) : 0;
             cur = (cur + side + n) % n;
             Port_LobbyFighterSet((cur < 161 ? cur : 198 + (cur - 161)) + 1);
+            Snd_PlaySe(1, 0);
+        } else if (side != 0 && r < LB_BTN && Tb_LbRule(r) == TB_RULE_VOICE) { /* (anyone: mic and speaker) */
+            extern int PortVoice_Mode(void);
+            extern int PortVoice_SpeakerOn(void);
+            extern void PortVoice_ModeSet(int mode);
+            extern void PortVoice_SpeakerSet(int on);
+            /* the steps: mic on + speaker on, push to talk + speaker on, mic off + speaker on, both off */
+            static const s32 kMic[4] = {1, 2, 0, 0}, kSpk[4] = {1, 1, 1, 0};
+            s32 m = PortVoice_Mode(), sp = PortVoice_SpeakerOn() != 0, cur = 0, j;
+            for (j = 0; j < 4; j++) {
+                if (kMic[j] == m && kSpk[j] == sp) {
+                    cur = j;
+                }
+            }
+            cur = (cur + side + 4) % 4;
+            PortVoice_ModeSet(kMic[cur]);
+            PortVoice_SpeakerSet(kSpk[cur]);
             Snd_PlaySe(1, 0);
         } else if (side != 0 && r < LB_BTN) {
             if (own && Tb_LbRule(r) == LOBBY_RULE_MODE && v->tour == 1) { /* (a tournament on: called off first, if so) */
@@ -2686,7 +2726,7 @@ static f32 Tb_LobbyRowY(s32 i) {
 }
 
 static f32 Tb_LobbyRuleY(s32 i) {
-    return 118.0f + 17.0f * (f32)i; /* (eight rows: this modded copy's Stage and My Fighter too) */
+    return 116.0f + 15.0f * (f32)i; /* (nine rows: this modded copy's Stage, My Fighter and Mic / Speaker too) */
 }
 
 static void Tb_LobbyBtnBox(s32 k, f32 *x0, f32 *y0, f32 *x1, f32 *y1) {
@@ -2738,8 +2778,11 @@ static void Tb_DrawLobby(void) {
         if (v->taken[i] && (v->isOwner[i] || i == v->me)) { /* the owner's mark, and this game's own place */
             Ps_Pill(TBO_KIT_STEEL, 160.0f, y + 5.0f, 200.0f, y + 17.0f, 0x80);
         }
+        if (v->taken[i] && v->talking[i]) { /* (this modded copy) the place's voice is heard: a gold frame */
+            Ps_Pill(TBO_KIT_GOLD, 51.0f, y - 1.0f, 77.0f, y + 23.0f, 0x80);
+        }
         if (v->taken[i] && v->fighter[i] > 0) { /* (this modded copy) the place's fighter: its face */
-            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[i] - 1, 30.0f, y + 1.0f, 50.0f, y + 21.0f, 0.28f, 0.03f, 0.72f, 0.25f, PS_PLAIN, 0x80);
+            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[i] - 1, 54.0f, y + 1.0f, 74.0f, y + 21.0f, 0.28f, 0.03f, 0.72f, 0.25f, PS_PLAIN, 0x80);
         }
     }
     /* (this modded copy) the two players standing at the foot, as the character select shows them */
@@ -2750,18 +2793,22 @@ static void Tb_DrawLobby(void) {
         }
     }
     Ps_Panel(TBO_KIT_WINDOW, LB_R0, 52.0f, LB_R1, 98.0f, 0x80);
+    if (v->stage >= 0) { /* (this modded copy) the map card: the lobby's stage */
+        Ps_Pill(TBO_KIT_STEEL, 429.0f, 54.0f, 499.0f, 96.0f, 0x80);
+        Ps_Sprite(TBO_STAGE_BASE + v->stage, 432.0f, 56.0f, 496.0f, 92.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+    }
     Ps_Panel(TBO_KIT_WINDOW, LB_R0, 101.0f, LB_R1, 255.0f, 0x80);
     for (i = 0; i < LB_RULES; i++) {
         f32 y = Tb_LobbyRuleY(i);
         s32 on = sTb->lbCol == 1 && sTb->lbRight == i && !sTb->lbChat;
 
         if (on) {
-            Ps_Pill(TBO_KIT_SEL, LB_R0 + 6.0f, y - 1.0f, LB_R1 - 6.0f, y + 16.0f, 0x80);
-            if ((v->owner || Tb_LbRule(i) == TB_RULE_FIGHTER) && v->phase == 0 && !Tb_RuleFixed(i)) {
-                Ps_Button(3, LB_R1 - 20.0f, y + 7.5f, 14.0f);
+            Ps_Pill(TBO_KIT_SEL, LB_R0 + 6.0f, y - 1.0f, LB_R1 - 6.0f, y + 14.0f, 0x80);
+            if ((v->owner || Tb_RowMine(i)) && (v->phase == 0 || Tb_LbRule(i) == TB_RULE_VOICE) && !Tb_RuleFixed(i)) {
+                Ps_Button(3, LB_R1 - 20.0f, y + 6.5f, 13.0f);
             }
         } else {
-            Ps_Pill(TBO_KIT_BAR, LB_R0 + 8.0f, y, LB_R1 - 8.0f, y + 15.0f, 0x80);
+            Ps_Pill(TBO_KIT_BAR, LB_R0 + 8.0f, y, LB_R1 - 8.0f, y + 13.0f, 0x80);
         }
     }
     for (k = 0; k < 4; k++) {
@@ -2823,7 +2870,8 @@ static void Tb_DrawLobbyText(void) {
         Ps_Text(37.0f, Ps_TextTop(mid, 0.5f), tag, 0.5f, 0.0f, on ? 1 : 4);
         Ps_Align(0);
         if (v->taken[i]) {
-            Ps_Text(54.0f, Ps_TextTop(mid, 0.6f), v->name[i], 0.6f, v->isOwner[i] || i == v->me ? 102.0f : 140.0f, on ? 1 : i == v->me ? 3 : 0);
+            f32 nx = v->fighter[i] > 0 || v->talking[i] ? 80.0f : 54.0f; /* (this modded copy: after the face) */
+            Ps_Text(nx, Ps_TextTop(mid, 0.6f), v->name[i], 0.6f, (v->isOwner[i] || i == v->me ? 102.0f : 140.0f) - (nx - 54.0f), on ? 1 : i == v->me ? 3 : 0);
             if (v->isOwner[i] || i == v->me) {
                 Ps_Align(1);
                 Ps_Text(180.0f, Ps_TextTop(mid, 0.34f), v->isOwner[i] ? "OWNER" : "YOU", 0.34f, 36.0f, 0);
@@ -2843,7 +2891,7 @@ static void Tb_DrawLobbyText(void) {
         Ps_Text(270.0f, Ps_TextTop(65.0f, 0.46f), "LOBBY CODE", 0.46f, 0.0f, 2);
         Ps_Text(270.0f, Ps_TextTop(83.0f, 0.95f), v->code, 0.95f, 120.0f, 0);
         Ps_Align(2);
-        Ps_Text(490.0f, Ps_TextTop(65.0f, 0.4f), v->owner ? "GIVE IT TO THE OTHERS" : "THE OTHERS JOIN WITH IT", 0.4f, 120.0f, 4);
+        Ps_Text(LB_HX, Ps_TextTop(65.0f, 0.4f), v->owner ? "GIVE IT TO THE OTHERS" : "THE OTHERS JOIN WITH IT", 0.4f, 120.0f, 4);
         Ps_Align(0);
     } else if (v->owner && v->port > 0) { /* Host by Address: the port, and this PC's address on its network */
         const char *lan = Port_NetLanAddress();
@@ -2852,11 +2900,11 @@ static void Tb_DrawLobbyText(void) {
         sprintf(line, "%d", (int)v->port);
         Ps_Text(270.0f, Ps_TextTop(83.0f, 0.8f), line, 0.8f, 80.0f, 0);
         Ps_Align(2);
-        Ps_Text(490.0f, Ps_TextTop(65.0f, 0.4f), "ON YOUR NETWORK", 0.4f, 130.0f, 4);
+        Ps_Text(LB_HX, Ps_TextTop(65.0f, 0.4f), "ON YOUR NETWORK", 0.4f, 130.0f, 4);
         if (lan[0] != 0) { /* (not `?:` between the network's text and a literal: the 32-bit pointers) */
-            Ps_Text(490.0f, Ps_TextTop(83.0f, 0.5f), (char *)lan, 0.5f, 136.0f, 5);
+            Ps_Text(LB_HX, Ps_TextTop(83.0f, 0.5f), (char *)lan, 0.5f, 136.0f, 5);
         } else {
-            Ps_Text(490.0f, Ps_TextTop(83.0f, 0.5f), "-", 0.5f, 136.0f, 5);
+            Ps_Text(LB_HX, Ps_TextTop(83.0f, 0.5f), "-", 0.5f, 136.0f, 5);
         }
         Ps_Align(0);
     } else {
@@ -2865,7 +2913,7 @@ static void Tb_DrawLobbyText(void) {
     }
     if (v->phase || v->tour != 0) {
         Ps_Align(2);
-        Ps_Text(490.0f, Ps_TextTop(84.0f, 0.46f), v->phase ? "A MATCH IS ON" : v->tour == 1 ? "TOURNAMENT ON" : "TOURNAMENT OVER", 0.46f, 110.0f, v->tour == 2 && !v->phase ? 4 : 5);
+        Ps_Text(LB_HX, Ps_TextTop(84.0f, 0.46f), v->phase ? "A MATCH IS ON" : v->tour == 1 ? "TOURNAMENT ON" : "TOURNAMENT OVER", 0.46f, 110.0f, v->tour == 2 && !v->phase ? 4 : 5);
         Ps_Align(0);
     }
     /* (this modded copy) VS between the two players standing at the foot */
@@ -2877,13 +2925,13 @@ static void Tb_DrawLobbyText(void) {
     /* the rules */
     Ps_Text(270.0f, Ps_TextTop(108.0f, 0.46f), v->owner ? "RULES" : "RULES (THE OWNER'S)", 0.46f, 220.0f, 2);
     for (i = 0; i < LB_RULES; i++) {
-        f32 mid = Tb_LobbyRuleY(i) + 7.5f;
+        f32 mid = Tb_LobbyRuleY(i) + 6.5f;
         s32 on = sTb->lbCol == 1 && sTb->lbRight == i && !sTb->lbChat;
 
         Ps_Text(282.0f, Ps_TextTop(mid, 0.46f), Tb_RuleName(i), 0.46f, 92.0f, on ? 1 : 0); /* (inside its bar as the places' names are) */
         Tb_RuleValue(line, i);
         Ps_Align(2);
-        Ps_Text(on && (v->owner || Tb_LbRule(i) == TB_RULE_FIGHTER) && v->phase == 0 && !Tb_RuleFixed(i) ? 456.0f : 482.0f, Ps_TextTop(mid, 0.42f), line, 0.42f, 124.0f, i == 0 && v->mode ? 1 : 3);
+        Ps_Text(on && (v->owner || Tb_RowMine(i)) && (v->phase == 0 || Tb_LbRule(i) == TB_RULE_VOICE) && !Tb_RuleFixed(i) ? 456.0f : 482.0f, Ps_TextTop(mid, 0.42f), line, 0.42f, 124.0f, i == 0 && v->mode ? 1 : 3);
         Ps_Align(0);
     }
     /* the buttons */

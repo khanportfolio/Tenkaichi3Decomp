@@ -1871,12 +1871,16 @@ static void online_tab(void) {
     }
     ImGui::SetItemTooltip("The two games compare what they compute. Off: when they no longer agree you are told, and the match\n"
                           "goes on (the two screens may then show different fights). On: the match ends there.");
-    bool mic = PortVoice_MicOn() != 0;
-    if (ImGui::Checkbox("Mic on (voice with the other player)", &mic)) {
-        PortVoice_MicSet(mic);
+    int micMode = PortVoice_Mode();
+    if (ImGui::Combo("Mic", &micMode, "Off\0On\0Push to talk (hold V)\0")) {
+        PortVoice_ModeSet(micMode);
     }
-    ImGui::SetItemTooltip("Your microphone is heard by the other player of an online match, and theirs by you.\n"
-                          "Ctrl+M or the MIC button at the top right during the match turns it on and off.");
+    ImGui::SetItemTooltip("Your microphone, heard by the other player of an online match and by everyone in a lobby.\n"
+                          "Ctrl+M or the MIC button at the top right turns it on and off. Push to talk: only while V is held.");
+    bool speaker = PortVoice_SpeakerOn() != 0;
+    if (ImGui::Checkbox("Speaker on (hear the others)", &speaker)) {
+        PortVoice_SpeakerSet(speaker);
+    }
     bool withMods = Port_Setting("net_mods", 0) != 0;
     if (ImGui::Checkbox("Online with my mods (Super characters)", &withMods)) {
         Port_SettingSave("net_mods", withMods);
@@ -3301,20 +3305,32 @@ static bool frame_build(void) {
     }
     if (PortVoice_Shown()) { // the mic badge, top right, in an online match; Ctrl+M turns the mic on and off
         if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_M, false)) {
-            PortVoice_MicSet(!PortVoice_MicOn());
+            PortVoice_MicSet(PortVoice_Mode() == VOICE_OFF);
         }
         ImGuiIO &vio = ImGui::GetIO();
         ImGui::SetNextWindowPos(ImVec2(vio.DisplaySize.x - 8, 8), ImGuiCond_Always, ImVec2(1, 0));
         ImGui::SetNextWindowBgAlpha(0.55f);
         if (ImGui::Begin("##mic", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav)) {
-            bool on = PortVoice_MicOn() != 0;
-            ImGui::PushStyleColor(ImGuiCol_Button, on ? ImVec4(0.1f, 0.55f, 0.2f, 1) : ImVec4(0.55f, 0.12f, 0.12f, 1));
-            if (ImGui::Button(on ? "MIC ON" : "MIC OFF")) {
-                PortVoice_MicSet(!on);
+            int mode = PortVoice_Mode();
+            bool live = PortVoice_Talking(0) != 0;
+            ImGui::PushStyleColor(ImGuiCol_Button, live ? ImVec4(0.15f, 0.75f, 0.3f, 1)
+                                                   : mode == VOICE_ON ? ImVec4(0.1f, 0.55f, 0.2f, 1)
+                                                   : mode == VOICE_PTT ? ImVec4(0.55f, 0.45f, 0.1f, 1)
+                                                                       : ImVec4(0.55f, 0.12f, 0.12f, 1));
+            if (ImGui::Button(mode == VOICE_ON ? "MIC ON" : mode == VOICE_PTT ? "MIC: HOLD V" : "MIC OFF")) {
+                PortVoice_ModeSet((mode + 1) % 3); // (On, Push to talk, Off)
             }
             ImGui::PopStyleColor();
-            ImGui::SetItemTooltip("Your microphone to the other player. Ctrl+M turns it on and off.");
+            ImGui::SetItemTooltip("Your microphone: On, Push to talk (hold V) or Off; a click goes to the next. Ctrl+M: On / Off.");
+            bool spk = PortVoice_SpeakerOn() != 0;
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, spk ? ImVec4(0.1f, 0.4f, 0.6f, 1) : ImVec4(0.55f, 0.12f, 0.12f, 1));
+            if (ImGui::Button(spk ? "SPEAKER ON" : "SPEAKER OFF")) {
+                PortVoice_SpeakerSet(!spk);
+            }
+            ImGui::PopStyleColor();
+            ImGui::SetItemTooltip("The others' voices: on or off.");
             if (PortVoice_TheyTalk()) {
                 ImGui::SameLine();
                 ImGui::TextColored(ImVec4(0.4f, 1, 0.5f, 1), "%s is talking", Port_NetName(!Port_NetMe()));
