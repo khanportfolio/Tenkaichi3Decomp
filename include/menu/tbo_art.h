@@ -26,7 +26,7 @@
     X(TBO_BTN_LEFTRIGHT, "btn_leftright") \
     X(TBO_BTN_CIRCLE, "btn_circle") \
     X(TBO_BTN_START, "btn_start") \
-    X(TBO_RADAR, "radar")                   /* the Dragon Radar of the search: its frames, 11 a row (src/menu/port_tbo.c Tb_Radar) */
+    X(TBO_RADAR, "radar")                   /* the Dragon Radar of the search: its frames, 11 a row (src/menu/port_tbo.c Tb_Radar) */ \
     X(MM_BG, "mm_bg")               /* the Mod Manager's pictures (src/menu/port_mmkit.c), in mm_sizes.h's order */ \
     X(MM_BAR, "mm_bar") \
     X(MM_BAR_SEL, "mm_bar_sel") \
