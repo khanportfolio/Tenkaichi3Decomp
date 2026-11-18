@@ -486,12 +486,23 @@ static void view_update(int force) {
    when both have the same mods (else the disc's game). */
 int Port_LobbyStage(void) {
     extern int Port_NetSession(void);
+    extern int Port_NetActive(void);
     extern int Port_NetModsHidden(void);
-    int st = sL.stage1 - 1;
-    if (sL.on == 0 || !Port_NetSession() || st < 0 || (st >= 36 && Port_NetModsHidden())) {
-        return -1;
+    static int said = -2;
+    int st = sL.stage1 - 1, out;
+    /* (18 Nov 2026: the two-copy test fought on another stage than the leader's: a lobby's match is connected
+       (Port_NetActive) without always being a "session"; either is enough) */
+    if (sL.on == 0 || !(Port_NetSession() || Port_NetActive()) || st < 0 || (st >= 36 && Port_NetModsHidden())) {
+        out = -1;
+    } else {
+        out = st;
     }
-    return st;
+    if (out != said) {
+        said = out;
+        fprintf(stderr, "bt3: lobby: the match's stage: %d (lobby %d, on %d, session %d, connected %d, mods hidden %d)\n", out, st,
+                sL.on, Port_NetSession(), Port_NetActive(), Port_NetModsHidden());
+    }
+    return out;
 }
 
 int Port_LobbyView(PortLobbyView *out) {
