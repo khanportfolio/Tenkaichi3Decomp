@@ -24,6 +24,7 @@
 
 int gPortOverlayOpen, gPortInputCapture, gPortChatTyping;
 extern int Port_Setting(const char *name, int def); /* plat_settings.c */
+extern int PortFriends_IsShown(void);               /* net_friends.c: the Friends window is open */
 extern void Port_SettingSave(const char *name, int value), Port_SettingsWrite(void);
 
 /* bits of the two button bytes together (byte 0 low), as include/sys/pad.h has them; 1 = pressed here */
@@ -1110,7 +1111,8 @@ int Port_PadRead(int socket, unsigned char *data) {
         sSwallow = held;
     }
     /* (the settings window is worked with the controller too while it is open: nothing of it for the game) */
-    g = gPortInputCapture || gPortOverlayOpen || sSwallow ? NULL : pad_of(socket);
+    /* (19 Nov 2026) and while the Friends window is open the controller is the window's (ui.cpp friends_draw) */
+    g = gPortInputCapture || gPortOverlayOpen || sSwallow || PortFriends_IsShown() ? NULL : pad_of(socket);
     if (g != NULL) {
         for (a = 0; a < PORT_PAD_BUTTONS; a++) {
             int src = sPadBtn[socket][a];

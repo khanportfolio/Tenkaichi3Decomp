@@ -3128,13 +3128,31 @@ static void friends_draw(void) {
         }
         ImGui::End();
     }
+    static bool wasShown;
     if (!show) {
+        wasShown = false;
         return;
+    }
+    if (!wasShown) { // (19 Nov 2026: just opened: the controller works in it from the first press)
+        ImGui::SetNextWindowFocus();
     }
     ImGui::SetNextWindowSize(ImVec2(520, 440), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
     bool open = true;
     if (ImGui::Begin("Kame House: Friends###kh_friends", &open, ImGuiWindowFlags_NoCollapse)) {
+        // 19 Nov 2026 (the user: "with a controller there is no way to close it"): a Close button first (the
+        // controller's cursor starts on it, Cross presses it), and Circle or Triangle close the window too
+        if (ImGui::Button("Close   (O / Triangle / Esc)", ImVec2(-1, 0))) {
+            open = false;
+        }
+        if (!wasShown) {
+            ImGui::SetItemDefaultFocus();
+        }
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+            (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false))) {
+            open = false;
+        }
+        ImGui::Separator();
         if (!v.known) {
             ImGui::TextDisabled("Asking the service...");
         } else {
@@ -3333,8 +3351,10 @@ static void friends_draw(void) {
         }
     }
     ImGui::End();
+    wasShown = true;
     if (!open) {
         PortFriends_Hide();
+        PortInput_Swallow(); // (the button that closed it does not also press the lobby's)
     }
 }
 
