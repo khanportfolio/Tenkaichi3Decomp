@@ -3371,6 +3371,9 @@ static void Lb_DrawText(void) {
             if (v->talking[i]) {
                 Lb_Txt(562.0f + dx, 124.0f, "speaking", 0.4f, 0.0f, 0, LB_GOLD);
             }
+            if (!v->ready[i] && !v->isOwner[i] && !v->mode) { /* (the READY badge's place: the plate's player is not set yet) */
+                Lb_Txt(470.0f + dx, 163.0f, "NOT READY", 0.5f, 0.0f, 1, LB_GREY);
+            }
         } else {
             Lb_Txt(466.0f + dx, 124.0f, "+  INVITE", 0.72f, 0.0f, 1, sTb->lbFocus == it ? Ps_Rgba(0xFF, 0xE6, 0x80, 0x80) : Ps_Rgba(0xFF, 0xFF, 0xFF, 0x80),
                    Ps_Rgba(0xDC, 0xE6, 0xFF, 0x80), Ps_Rgba(0x08, 0x12, 0x26, 0x80));
@@ -3495,9 +3498,12 @@ lb_start:
         char *big = "START";
         char *small = "Both players ready";
 
-        if (act == LB_ACT_READY) {
+        if (act == LB_ACT_READY && v->me >= 0 && v->ready[v->me]) { /* (19 Nov 2026, the user: both, as PUBG) */
+            big = "CANCEL";
+            small = "You are ready - press to cancel";
+        } else if (act == LB_ACT_READY) {
             big = "READY";
-            small = "Tell the leader you are set";
+            small = "Press when you are set";
         } else if (act == LB_ACT_BRACKET) {
             big = "BRACKET";
             small = "The tournament's matches";
