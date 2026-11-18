@@ -70,14 +70,16 @@ jobs:
 
   # The Mac zip (Apple Silicon), built by macos.yml on GitHub's Mac, with the release's key and number on a tag
   macos:
-    if: startsWith(github.ref, 'refs/tags/v')   # (a push's Mac check is macos.yml's own run)
+    # (18 Nov 2026, the user: Windows first, the Mac later) not part of a release for now; put the line below back to
+    # if: startsWith(github.ref, 'refs/tags/v') and `needs: [build, macos]` under publish to bring it back
+    if: false
     uses: ./.github/workflows/macos.yml
     secrets: inherit
 
   # A tag: the three archives signed for the automatic update and attached to a draft release
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, macos]
+    needs: [build]
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     steps:
@@ -97,7 +99,7 @@ jobs:
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
-          Z="port/build/Tenkaichi3Decomp-linux-x64.zip port/build/Tenkaichi3Decomp-windows-x64.zip port/build/Tenkaichi3Decomp-macos-arm64.zip"
+          Z="$(ls port/build/Tenkaichi3Decomp-*.zip)"
           if [ -z "$UPDATE_SIGNING_KEY" ]; then
             echo "::warning title=Unsigned release::The secret UPDATE_SIGNING_KEY is not set: the archives are NOT signed, and games will not install this release by themselves (they still say it exists). See port/release/README.md."
           else
@@ -110,5 +112,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" --generate-notes \
-            port/build/Tenkaichi3Decomp-linux-x64.zip port/build/Tenkaichi3Decomp-windows-x64.zip \
-            port/build/Tenkaichi3Decomp-macos-arm64.zip $(ls port/build/Tenkaichi3Decomp-*.zip.sig 2>/dev/null)
+            $(ls port/build/Tenkaichi3Decomp-*.zip) $(ls port/build/Tenkaichi3Decomp-*.zip.sig 2>/dev/null)
