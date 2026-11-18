@@ -1247,7 +1247,16 @@ static int chat_event(const SDL_Event *ev) {
            ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev->type == SDL_EVENT_MOUSE_BUTTON_UP || ev->type == SDL_EVENT_MOUSE_WHEEL;
 }
 
+// 18 Nov 2026 (the user: "when I use my mouse I want to see the pointer, so I can click anything"): when the mouse
+// was last moved or clicked; a key or a controller button puts it out of use (0) and the pointer goes again
+static Uint64 sMouseSeen;
+
 int Ui_Event(const SDL_Event *ev) {
+    if (ev->type == SDL_EVENT_MOUSE_MOTION || ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev->type == SDL_EVENT_MOUSE_WHEEL) {
+        sMouseSeen = SDL_GetTicks();
+    } else if (ev->type == SDL_EVENT_KEY_DOWN || ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        sMouseSeen = 0;
+    }
     if (!sReady) {
         return 0;
     }
@@ -3578,7 +3587,9 @@ static bool frame_build(void) {
     // The mouse pointer is hidden over the game's picture and shown with a window of this file that takes the mouse:
     // the settings, the online windows, the question before the game closes, a chat line being typed (setting
     // hide_pointer, on unless 0). The SDL back end hides it for this cursor at the next frame.
-    if (!sOpen && !sQuit && !sChat && Port_Setting("hide_pointer", 1) != 0) {
+    // (18 Nov 2026) It shows over the game too while the mouse is in use: moved or clicked in the last 3 seconds and
+    // no key or controller button since.
+    if (!sOpen && !sQuit && !sChat && Port_Setting("hide_pointer", 1) != 0 && (sMouseSeen == 0 || SDL_GetTicks() - sMouseSeen > 3000)) {
         ImGui::SetMouseCursor(ImGuiMouseCursor_None);
     }
     if (sMovieShow) {
