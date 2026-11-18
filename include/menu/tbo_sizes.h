@@ -25,6 +25,45 @@ static const u16 sTboSize[TBO_ART_COUNT][3] = {
     {256, 256, 0}, /* btn_circle */
     {289, 120, 0}, /* btn_start */
     {2420, 2728, 0}, /* radar */
+    {128, 128, 24}, /* lb2_glass */
+    {256, 80, 30}, /* lb2_plate */
+    {256, 64, 16}, /* lb2_topbar */
+    {200, 60, 30}, /* lb2_btn_dark */
+    {320, 72, 20}, /* lb2_btn_blue */
+    {96, 96, 0}, /* lb2_badge */
+    {378, 156, 0}, /* lb2_start */
+    {86, 86, 0}, /* lb2_logo */
+    {72, 72, 0}, /* lb2_r_mic */
+    {72, 72, 0}, /* lb2_r_mic_off */
+    {72, 72, 0}, /* lb2_r_spk */
+    {72, 72, 0}, /* lb2_r_spk_off */
+    {72, 72, 0}, /* lb2_r_inv */
+    {72, 72, 0}, /* lb2_r_rank */
+    {72, 72, 0}, /* lb2_r_chat */
+    {114, 129, 0}, /* lb2_f_daily */
+    {113, 129, 0}, /* lb2_f_tour */
+    {113, 129, 0}, /* lb2_f_history */
+    {114, 129, 0}, /* lb2_f_costume */
+    {167, 35, 0}, /* lb2_ready */
+    {60, 40, 0}, /* lb2_crown */
+    {60, 60, 0}, /* lb2_emblem */
+    {357, 46, 0}, /* lb2_change */
+    {95, 37, 0}, /* lb2_copy */
+    {117, 38, 0}, /* lb2_leave */
+    {117, 38, 0}, /* lb2_close */
+    {280, 34, 0}, /* lb2_tabs */
+    {429, 52, 0}, /* lb2_chatin */
+    {36, 26, 0}, /* lb2_i_eye */
+    {27, 26, 0}, /* lb2_i_rules */
+    {37, 25, 0}, /* lb2_i_friends */
+    {19, 20, 0}, /* lb2_i_pin */
+    {26, 24, 0}, /* lb2_i_battle */
+    {26, 24, 0}, /* lb2_i_time */
+    {26, 24, 0}, /* lb2_i_speed */
+    {26, 24, 0}, /* lb2_i_roll */
+    {26, 24, 0}, /* lb2_i_delay */
+    {40, 42, 0}, /* lb2_i_globe */
+    {24, 24, 0}, /* lb2_i_bolt */
 };
 
 #endif

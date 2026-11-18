@@ -38,6 +38,7 @@ int Port_NetSpeedStandard(void);                   // what a quick match runs at
 void Port_NetNameSet(const char *name);         // gs/net.c: this player's name for the match
 int Port_IsWide(void);                         // plat_stub.c: the picture is wider than 4:3
 int Port_AspectMilli(void);
+extern "C" int gPortLobbyPageShown;                // src/menu/port_tbo.c: set while the lobby page is drawn (18 Nov 2026)
 extern "C" int gPortTboTyping;                     // gs_input.c: a keypad of Tenkaichi Budokai Online takes text
 extern "C" int PortInput_TboEvent(const SDL_Event *ev);
 extern "C" void PortInput_TboClipboard(void);      // ... and its "Copy Code": onto the clipboard, from this thread
@@ -3647,7 +3648,12 @@ static bool frame_build(void) {
         chat_draw();
     }
     friends_draw();
-    if (PortVoice_Shown()) { // the mic badge, top right, in an online match; Ctrl+M turns the mic on and off
+    // (18 Nov 2026) not over the lobby's page, which has its own MIC and SPEAKER at the top right now
+    bool lobbyPage = gPortLobbyPageShown > 0;
+    if (lobbyPage) {
+        gPortLobbyPageShown--;
+    }
+    if (PortVoice_Shown() && !lobbyPage) { // the mic badge, top right, in an online match; Ctrl+M turns the mic on and off
         if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_M, false)) {
             PortVoice_MicSet(PortVoice_Mode() == VOICE_OFF);
         }

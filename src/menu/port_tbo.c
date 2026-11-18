@@ -2477,30 +2477,38 @@ extern int Port_NetSession(void);
 
 enum {
     LBI_COPY, LBI_LEAVE, LBI_P1, LBI_P2, LBI_W0, LBI_MIC = LBI_W0 + 6, LBI_SPK, LBI_INVITE, LBI_RANK, LBI_QUICK, LBI_CHAT,
-    LBI_MAP, LBI_RULES, LBI_FIGHTER, LBI_FRIENDS, LBI_START, LBI_COUNT
+    LBI_MAP, LBI_RULES, LBI_FIGHTER, LBI_FRIENDS, LBI_START,
+    LBI_MICT, LBI_SPKT, LBI_DAILY, LBI_TOURN, LBI_HISTORY, LBI_COSTUME, /* (18 Nov 2026: the new design's) */ LBI_COUNT
 };
-/* the mockup's boxes (1280 x 720 pixels) */
+/* the boxes (1280 x 720 pixels): 18 Nov 2026, the user's new design (Super-Characters/lobby-design-18Nov/design.png,
+   1672 x 941; its places x 0.7656) */
 static const s16 kLbBox[LBI_COUNT][4] = {
-    {340, 26, 420, 60},     /* COPY */
-    {1150, 16, 1260, 60},   /* LEAVE */
-    {365, 108, 575, 160},   /* player 1's name plate */
-    {705, 108, 915, 160},   /* player 2's */
-    {32, 136, 158, 176}, {32, 184, 158, 224}, {32, 232, 158, 272}, {32, 280, 158, 320}, {32, 328, 158, 368}, {32, 376, 158, 416},
-    {42, 492, 98, 548},     /* MIC (round) */
-    {112, 492, 168, 548},   /* SPEAKER */
-    {182, 492, 238, 548},   /* INVITE */
-    {252, 492, 308, 548},   /* RANKING */
-    {322, 492, 378, 548},   /* QUICK CHAT (18 Nov 2026) */
-    {20, 580, 380, 700},    /* the chat */
-    {980, 90, 1260, 300},   /* the map card */
-    {980, 312, 1260, 400},  /* the rules */
-    {980, 412, 1260, 462},  /* CHANGE FIGHTER */
-    {980, 480, 1260, 570},  /* the online friends */
-    {980, 590, 1260, 690},  /* START */
+    {271, 45, 344, 73},     /* COPY */
+    {1174, 16, 1264, 45},   /* LEAVE / CLOSE */
+    {373, 100, 559, 147},   /* player 1's name plate */
+    {717, 100, 900, 147},   /* player 2's */
+    {29, 134, 191, 169}, {29, 175, 191, 210}, {29, 216, 191, 251}, {29, 257, 191, 292}, {29, 298, 191, 333}, {29, 339, 191, 374},
+    {37, 437, 93, 492},     /* MIC (round) */
+    {106, 437, 162, 492},   /* SPEAKER */
+    {176, 437, 232, 492},   /* INVITE */
+    {245, 437, 301, 492},   /* RANKING */
+    {314, 437, 370, 492},   /* QUICK CHAT */
+    {17, 525, 357, 687},    /* the chat */
+    {991, 90, 1264, 243},   /* the map card */
+    {991, 253, 1264, 393},  /* the rules */
+    {991, 403, 1264, 439},  /* CHANGE FIGHTER */
+    {991, 447, 1264, 553},  /* the online friends */
+    {981, 570, 1270, 689},  /* START */
+    {1095, 54, 1169, 81},   /* the microphone, at the top */
+    {1175, 54, 1252, 81},   /* the speaker */
+    {595, 582, 682, 681},   /* DAILY CHALLENGE */
+    {684, 582, 771, 681},   /* TOURNAMENT */
+    {774, 582, 860, 681},   /* MATCH HISTORY */
+    {864, 582, 951, 681},   /* COSTUME / AURA */
 };
-#define LB_SQUAD_X1 470.0f  /* player 1's feet across (player 2: 1280 - this) */
-#define LB_SQUAD_FEET 585.0f
-#define LB_SQUAD_H 420.0f
+#define LB_SQUAD_X1 475.0f  /* player 1's feet across (player 2: 1280 - this) */
+#define LB_SQUAD_FEET 505.0f
+#define LB_SQUAD_H 330.0f
 static s32 sLb3d[2];               /* a side's model stands (its picture is not drawn) */
 static PortFriendsView sLbFriends; /* (read twice a second) */
 
@@ -2633,13 +2641,16 @@ static void Lb_PickOpen(s32 kind);
 static s32 Lb_Pointer(f32 *x, f32 *y);
 /* (18 Nov 2026, BGMI's quick messages) one press, a line of chat to everyone */
 #define LB_QUICK_N 8
-static char *const kLbQuick[LB_QUICK_N] = {"Ready!", "GG", "One more?", "Nice!", "Wait for me", "Let's go!", "Good luck", "Change the map?"};
+static char *const kLbQuick[LB_QUICK_N] = {"Good luck!", "GG", "Rematch?", "Ready!", "Nice!", "Let's go!", "Wait for me", "Change the map?"};
 
 static void Lb_QuickBox(s32 i, f32 *x0, f32 *y0, f32 *x1, f32 *y1) {
-    *x0 = Lb_X(40.0f);
-    *x1 = Lb_X(330.0f);
-    *y0 = Lb_Y(150.0f + 40.0f * (f32)i);
-    *y1 = *y0 + Lb_Y(34.0f);
+    f32 cx = (i % 2) == 0 ? 382.0f : 478.0f;
+    f32 cy = 569.0f + 28.5f * (f32)(i / 2);
+
+    *x0 = Lb_X(cx);
+    *x1 = Lb_X(cx + 92.0f);
+    *y0 = Lb_Y(cy);
+    *y1 = Lb_Y(cy + 24.0f);
 }
 
 /* The leader's START: a countdown of three seconds, said in the chat to everyone, then the match. */
@@ -2767,6 +2778,40 @@ static void Lb_Press(s32 it, s32 own) {
             Tb_LobbyAction(Lb_StartAct());
         }
         break;
+    case LBI_MICT: { /* (the top's: as the round ones) */
+        s32 m = PortVoice_Mode();
+
+        PortVoice_ModeSet(m == 1 ? 2 : m == 2 ? 0 : 1);
+        Snd_PlaySe(1, 0);
+        break;
+    }
+    case LBI_SPKT:
+        PortVoice_SpeakerSet(!PortVoice_SpeakerOn());
+        Snd_PlaySe(1, 0);
+        break;
+    case LBI_DAILY:
+        Snd_PlaySe(1, 2);
+        Tb_Note("DAILY CHALLENGES: COMING SOON");
+        break;
+    case LBI_TOURN:
+        if (own && sTbLv.phase == 0 && sTbLv.tour != 1) {
+            Port_LobbyDo(LOBBY_RULE, LOBBY_RULE_MODE, 1);
+            Snd_PlaySe(1, 1);
+            Tb_Note(sTbLv.mode ? "BACK TO A VERSUS MATCH" : "TOURNAMENT: 2 TO 8 PLAYERS, THE LEADER STARTS IT");
+        } else {
+            Snd_PlaySe(1, 2);
+            Tb_Note("THE LEADER CHOOSES TOURNAMENT OR VERSUS");
+        }
+        break;
+    case LBI_HISTORY:
+        Snd_PlaySe(1, 1);
+        PortFriends_Show(1);
+        Tb_Note("MATCH HISTORY: THE PLAYERS YOU MET");
+        break;
+    case LBI_COSTUME:
+        Lb_PickOpen(1);
+        Tb_Note("COSTUMES AND AURAS: AT THE FIGHT'S CHARACTER SELECT");
+        break;
     }
 }
 
@@ -2846,6 +2891,27 @@ static void Lb_Update(s32 live, s32 own) {
             sTb->lbQuick = 0;
         }
         return;
+    }
+    { /* (18 Nov 2026: the quick chat is always on the page: a click on one of its lines sends it) */
+        f32 mx;
+        f32 my;
+        s32 i;
+
+        if ((ev & 2) && Lb_Pointer(&mx, &my)) {
+            for (i = 0; i < LB_QUICK_N; i++) {
+                f32 qx0;
+                f32 qy0;
+                f32 qx1;
+                f32 qy1;
+
+                Lb_QuickBox(i, &qx0, &qy0, &qx1, &qy1);
+                if (mx >= qx0 && mx <= qx1 && my >= qy0 && my <= qy1) {
+                    Port_LobbySay(kLbQuick[i]);
+                    Snd_PlaySe(1, 1);
+                    return;
+                }
+            }
+        }
     }
     if (f < 0 || f >= LBI_COUNT) {
         f = LBI_START;
@@ -2960,7 +3026,41 @@ static void Lb_Squad(void) {
     }
 }
 
-/* The page's pictures and panels (Tb_DrawLobby). */
+/* 18 Nov 2026: the lobby redrawn after the user's new design (Super-Characters/lobby-design-18Nov/design.png, made
+   with an image AI; its pieces in tbo/ui/lb2_*.png, made by Super-Characters/tools/lobby_art.py): glass panels on
+   the Kame House sunset, the rank / record / region bar at the top, name plates with a badge and READY over the two
+   fighters, a VS between them, the quick chat always open beside the chat, four tiles (daily challenge, tournament,
+   match history, costume) and a gold START with dragon balls. The words are the game's (Lb_DrawText). */
+static void Lb_Pic(s32 id, f32 x0, f32 y0, f32 x1, f32 y1, s32 alpha) {
+    Ps_Sprite(id, Lb_X(x0), Lb_Y(y0), Lb_X(x1), Lb_Y(y1), 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, alpha);
+}
+
+static void Lb_BoxPic(s32 it, s32 id, s32 alpha) {
+    f32 x0;
+    f32 y0;
+    f32 x1;
+    f32 y1;
+
+    Lb_Box(it, &x0, &y0, &x1, &y1);
+    Ps_Sprite(id, x0, y0, x1, y1, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, alpha);
+}
+
+static void Lb_Bar(f32 x0, f32 y0, f32 x1, f32 y1, u32 c) {
+    Ps_Quad(Lb_X(x0), Lb_Y(y0), Lb_X(x1), Lb_Y(y0), Lb_X(x0), Lb_Y(y1), Lb_X(x1), Lb_Y(y1), c, c, c, c);
+}
+
+/* the strength bars of a connection, low to high */
+static void Lb_Signal(f32 x, f32 y1) {
+    s32 k;
+    u32 c = Ps_Rgba(0x40, 0xE8, 0x80, 0x80);
+
+    for (k = 0; k < 4; k++) {
+        Lb_Bar(x + 5.0f * (f32)k, y1 - 4.0f - 3.5f * (f32)k, x + 5.0f * (f32)k + 3.0f, y1, c);
+    }
+}
+
+int gPortLobbyPageShown; /* (read by port/src/gs/ui.cpp: the old mic badge is not drawn over this page) */
+
 static void Lb_Draw(void) {
     PortLobbyView *v = &sTbLv;
     f32 x0;
@@ -2968,89 +3068,156 @@ static void Lb_Draw(void) {
     f32 x1;
     f32 y1;
     s32 it;
+    s32 i;
 
+    gPortLobbyPageShown = 4;
     Lb_Squad();
-    /* the top: the code, COPY, LEAVE */
-    Ps_Panel(TBO_KIT_WINDOW, Lb_X(20.0f), Lb_Y(16.0f), Lb_X(330.0f), Lb_Y(70.0f), 0x80);
+    /* the top left: the logo, the arena's name, the code, COPY */
+    Ps_Panel(TBO_LB2_TOPBAR, Lb_X(8.0f), Lb_Y(6.0f), Lb_X(352.0f), Lb_Y(78.0f), 0x58);
+    Lb_Pic(TBO_LB2_LOGO, 12.0f, 6.0f, 80.0f, 74.0f, 0x80);
     Lb_Focus(LBI_COPY);
-    Lb_Box(LBI_COPY, &x0, &y0, &x1, &y1);
-    Ps_Pill(TBO_KIT_BAR, x0, y0, x1, y1, 0x80);
+    Lb_BoxPic(LBI_COPY, TBO_LB2_COPY, 0x80);
+    /* the top bar: rank, record, region */
+    Ps_Panel(TBO_LB2_TOPBAR, Lb_X(362.0f), Lb_Y(8.0f), Lb_X(858.0f), Lb_Y(66.0f), 0x80);
+    Lb_Pic(TBO_LB2_EMBLEM, 384.0f, 13.0f, 430.0f, 59.0f, 0x80);
+    Lb_Bar(553.0f, 20.0f, 554.5f, 54.0f, Ps_Rgba(0x9C, 0xB4, 0xE8, 0x50));
+    Lb_Bar(690.0f, 20.0f, 691.5f, 54.0f, Ps_Rgba(0x9C, 0xB4, 0xE8, 0x50));
+    Lb_Pic(TBO_LB2_I_GLOBE, 717.0f, 18.0f, 748.0f, 50.0f, 0x80);
+    Lb_Signal(822.0f, 34.0f);
+    /* LEAVE or CLOSE, and the microphone and the speaker */
     Lb_Focus(LBI_LEAVE);
-    Lb_Box(LBI_LEAVE, &x0, &y0, &x1, &y1);
-    Ps_Pill(TBO_KIT_STEEL, x0, y0, x1, y1, 0x80);
-    /* who watches */
-    Ps_Panel(TBO_KIT_WINDOW, Lb_X(20.0f), Lb_Y(96.0f), Lb_X(170.0f), Lb_Y(440.0f), 0x80);
-    for (it = LBI_W0; it < LBI_W0 + 6; it++) {
-        s32 i = Lb_Place(it);
+    Lb_BoxPic(LBI_LEAVE, v->owner ? TBO_LB2_CLOSE : TBO_LB2_LEAVE, 0x80);
+    for (it = LBI_MICT; it <= LBI_SPKT; it++) {
+        s32 on = it == LBI_MICT ? PortVoice_Mode() != 0 : PortVoice_SpeakerOn();
+        s32 pic = it == LBI_MICT ? (on ? TBO_LB2_R_MIC : TBO_LB2_R_MIC_OFF) : (on ? TBO_LB2_R_SPK : TBO_LB2_R_SPK_OFF);
 
         Lb_Focus(it);
         Lb_Box(it, &x0, &y0, &x1, &y1);
+        Ps_Pill(TBO_LB2_BTN_DARK, x0, y0, x1, y1, 0x80);
+        Ps_Sprite(pic, x0 + 2.0f, y0 + 1.0f, x0 + 2.0f + (y1 - y0 - 2.0f) * 0.857f, y1 - 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+    }
+    /* who watches */
+    Ps_Panel(TBO_LB2_GLASS, Lb_X(17.0f), Lb_Y(90.0f), Lb_X(204.0f), Lb_Y(422.0f), 0x80);
+    Lb_Pic(TBO_LB2_I_EYE, 31.0f, 101.0f, 58.0f, 120.0f, 0x80);
+    for (it = LBI_W0; it < LBI_W0 + 6; it++) {
+        i = Lb_Place(it);
+        Lb_Focus(it);
+        Lb_Box(it, &x0, &y0, &x1, &y1);
         if (v->taken[i] && v->talking[i]) {
-            Ps_Pill(TBO_KIT_GOLD, x0, y0, x1, y1, 0x80);
-        } else {
-            Ps_Pill(TBO_KIT_BAR, x0, y0, x1, y1, v->taken[i] ? 0x80 : 0x40);
+            Ps_Pill(TBO_KIT_GOLD, x0 - 1.0f, y0 - 1.0f, x1 + 1.0f, y1 + 1.0f, 0x80);
         }
+        Ps_Panel(TBO_LB2_GLASS, x0, y0, x1, y1, v->taken[i] ? 0x80 : 0x68);
         if (v->taken[i] && v->fighter[i] > 0) {
             f32 s = (y1 - y0) - 6.0f;
 
             Ps_Sprite(TBO_FACE_BASE + v->fighter[i] - 1, x0 + 4.0f, y0 + 3.0f, x0 + 4.0f + s * 0.857f, y0 + 3.0f + s, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
         }
     }
-    /* the players' name plates (the gold ring while one talks) */
+    /* the two players: the leader's crown, the plate and its badge, READY */
     for (it = LBI_P1; it <= LBI_P2; it++) {
-        s32 i = Lb_Place(it);
+        f32 dx = it == LBI_P1 ? 0.0f : 344.0f;
 
+        i = Lb_Place(it);
         Lb_Focus(it);
         Lb_Box(it, &x0, &y0, &x1, &y1);
         if (v->taken[i] && v->talking[i]) {
-            Ps_Pill(TBO_KIT_GOLD, x0 - 2.0f, y0 - 2.0f, x1 + 2.0f, y1 + 2.0f, 0x80);
+            Ps_Pill(TBO_KIT_GOLD, x0 - 3.0f, y0 - 3.0f, x1 + 3.0f, y1 + 3.0f, 0x80);
         }
-        Ps_Panel(TBO_KIT_WINDOW, x0, y0, x1, y1, 0x80);
+        Ps_Panel(TBO_LB2_PLATE, x0, y0, x1, y1, 0x80);
         if (i == sTb->lbPicked) {
             Ps_Pill(TBO_KIT_GOLD, x0 + 4.0f, y0 + 4.0f, x1 - 4.0f, y1 - 4.0f, 0x60);
+        }
+        if (v->taken[i]) {
+            Lb_Pic(TBO_LB2_BADGE, 374.0f + dx, 99.0f, 420.0f + dx, 145.0f, 0x80);
+            if (v->isOwner[i]) {
+                Lb_Pic(TBO_LB2_CROWN, 449.0f + dx, 67.0f, 495.0f + dx, 98.0f, 0x80);
+            }
+            if (v->ready[i] || v->isOwner[i]) {
+                Lb_Pic(TBO_LB2_READY, 406.0f + dx, 150.0f, 534.0f + dx, 177.0f, 0x80);
+            }
         }
     }
     /* the round buttons */
     for (it = LBI_MIC; it <= LBI_QUICK; it++) {
-        u32 mid = Ps_Rgba(0x18, 0x9C, 0x5C, 0x78);
-        u32 edge = Ps_Rgba(0x10, 0x70, 0x40, 0x78);
+        s32 pic = it == LBI_MIC ? (PortVoice_Mode() != 0 ? TBO_LB2_R_MIC : TBO_LB2_R_MIC_OFF)
+                : it == LBI_SPK ? (PortVoice_SpeakerOn() ? TBO_LB2_R_SPK : TBO_LB2_R_SPK_OFF)
+                : it == LBI_INVITE ? TBO_LB2_R_INV : it == LBI_RANK ? TBO_LB2_R_RANK : TBO_LB2_R_CHAT;
 
-        if ((it == LBI_MIC && PortVoice_Mode() == 0) || (it == LBI_SPK && !PortVoice_SpeakerOn())) {
-            mid = Ps_Rgba(0x9C, 0x28, 0x28, 0x78);
-            edge = Ps_Rgba(0x60, 0x14, 0x14, 0x78);
-        } else if (it == LBI_RANK) {
-            mid = Ps_Rgba(0x28, 0x5C, 0xB4, 0x78);
-            edge = Ps_Rgba(0x14, 0x34, 0x78, 0x78);
-        }
         Lb_Focus(it);
-        Lb_Box(it, &x0, &y0, &x1, &y1);
-        Ps_Disc((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (y1 - y0) * 0.5f + 1.0f, Ps_Rgba(0xFF, 0xFF, 0xFF, 0x70), Ps_Rgba(0xFF, 0xFF, 0xFF, 0x70));
-        Ps_Disc((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (y1 - y0) * 0.5f - 1.0f, mid, edge);
+        Lb_BoxPic(it, pic, 0x80);
     }
-    /* the chat, the right side */
-    for (it = LBI_CHAT; it <= LBI_START; it++) {
-        Lb_Focus(it);
-        Lb_Box(it, &x0, &y0, &x1, &y1);
-        if (it == LBI_START) {
-            Ps_Pill(TBO_KIT_GOLD, x0, y0, x1, y1, Lb_StartAct() == LB_ACT_START && !Tb_LobbyCanStart() ? 0x58 : 0x80);
-        } else if (it == LBI_FIGHTER) {
-            Ps_Pill(TBO_KIT_BAR, x0, y0, x1, y1, 0x80);
-        } else {
-            Ps_Panel(TBO_KIT_WINDOW, x0, y0, x1, y1, 0x80);
+    /* the chat: its tabs, the last lines, the line to type in */
+    Lb_Focus(LBI_CHAT);
+    Lb_Box(LBI_CHAT, &x0, &y0, &x1, &y1);
+    Ps_Panel(TBO_LB2_GLASS, x0, y0, x1, y1, 0x80);
+    Lb_Pic(TBO_LB2_TABS, 21.0f, 529.0f, 235.0f, 555.0f, 0x80);
+    Lb_Pic(TBO_LB2_CHATIN, 23.0f, 638.0f, 351.0f, 678.0f, 0x80);
+    /* the quick chat, always open beside it */
+    Ps_Panel(TBO_LB2_GLASS, Lb_X(374.0f), Lb_Y(540.0f), Lb_X(576.0f), Lb_Y(688.0f), 0x80);
+    Lb_Pic(TBO_LB2_I_BOLT, 383.0f, 546.0f, 400.0f, 564.0f, 0x80);
+    for (i = 0; i < LB_QUICK_N; i++) {
+        Lb_QuickBox(i, &x0, &y0, &x1, &y1);
+        Ps_Panel(TBO_LB2_GLASS, x0, y0, x1, y1, sTb->lbQuick && i == sTb->lbQuickCur ? 0x80 : 0x70);
+        if (sTb->lbQuick && i == sTb->lbQuickCur) {
+            Ps_Pill(TBO_KIT_SEL, x0 - 1.5f, y0 - 1.5f, x1 + 1.5f, y1 + 1.5f, 0x80);
         }
     }
-    if (v->stage >= 0) { /* the map's picture */
-        Ps_Sprite(TBO_STAGE_BASE + v->stage, Lb_X(992.0f), Lb_Y(102.0f), Lb_X(1248.0f), Lb_Y(246.0f), 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+    /* the four tiles */
+    for (it = LBI_DAILY; it <= LBI_COSTUME; it++) {
+        Lb_Focus(it);
+        Lb_BoxPic(it, it == LBI_DAILY ? TBO_LB2_F_DAILY : it == LBI_TOURN ? TBO_LB2_F_TOUR : it == LBI_HISTORY ? TBO_LB2_F_HISTORY : TBO_LB2_F_COSTUME, 0x80);
     }
-    if (sTb->lbQuick) { /* the quick messages over the lower left */
-        s32 i;
+    /* the map card */
+    Lb_Focus(LBI_MAP);
+    Lb_Box(LBI_MAP, &x0, &y0, &x1, &y1);
+    Ps_Panel(TBO_LB2_GLASS, x0, y0, x1, y1, 0x80);
+    if (v->stage >= 0) {
+        Lb_Pic(TBO_STAGE_BASE + v->stage, 996.0f, 95.0f, 1259.0f, 217.0f, 0x80);
+    }
+    {
+        u32 clear = Ps_Rgba(0x06, 0x0E, 0x1C, 0x00);
+        u32 dark = Ps_Rgba(0x06, 0x0E, 0x1C, 0x70);
 
-        Ps_Panel(TBO_KIT_WINDOW, Lb_X(28.0f), Lb_Y(112.0f), Lb_X(342.0f), Lb_Y(480.0f), 0x80);
-        for (i = 0; i < LB_QUICK_N; i++) {
-            Lb_QuickBox(i, &x0, &y0, &x1, &y1);
-            Ps_Pill(i == sTb->lbQuickCur ? TBO_KIT_SEL : TBO_KIT_BAR, x0, y0, x1, y1, 0x80);
+        Ps_Quad(Lb_X(996.0f), Lb_Y(170.0f), Lb_X(1259.0f), Lb_Y(170.0f), Lb_X(996.0f), Lb_Y(217.0f), Lb_X(1259.0f), Lb_Y(217.0f), clear, clear, dark, dark);
+    }
+    Lb_Pic(TBO_LB2_I_PIN, 1001.0f, 220.0f, 1015.0f, 235.0f, 0x80);
+    /* the rules */
+    Lb_Focus(LBI_RULES);
+    Lb_Box(LBI_RULES, &x0, &y0, &x1, &y1);
+    Ps_Panel(TBO_LB2_GLASS, x0, y0, x1, y1, 0x80);
+    Lb_Pic(TBO_LB2_I_RULES, 1003.0f, 258.0f, 1024.0f, 278.0f, 0x80);
+    for (i = 0; i < 5; i++) {
+        static const s32 kIcon[5] = {TBO_LB2_I_BATTLE, TBO_LB2_I_TIME, TBO_LB2_I_SPEED, TBO_LB2_I_ROLL, TBO_LB2_I_DELAY};
+        f32 cy = 296.0f + 20.5f * (f32)i;
+
+        Lb_Pic(kIcon[i], 1006.0f, cy - 9.0f, 1026.0f, cy + 9.0f, 0x80);
+    }
+    /* CHANGE FIGHTER */
+    Lb_Focus(LBI_FIGHTER);
+    Lb_BoxPic(LBI_FIGHTER, TBO_LB2_CHANGE, 0x80);
+    /* the online friends: their round faces and a button each */
+    Lb_Focus(LBI_FRIENDS);
+    Lb_Box(LBI_FRIENDS, &x0, &y0, &x1, &y1);
+    Ps_Panel(TBO_LB2_GLASS, x0, y0, x1, y1, 0x80);
+    Lb_Pic(TBO_LB2_I_FRIENDS, 997.0f, 451.0f, 1025.0f, 470.0f, 0x80);
+    {
+        s32 shown = 0;
+        s32 k;
+
+        for (k = 0; k < sLbFriends.friendCount && shown < 2; k++) {
+            f32 cy = 488.0f + 28.0f * (f32)shown;
+
+            if (!sLbFriends.friends[k].online) {
+                continue;
+            }
+            Ps_Disc(Lb_X(1013.0f), Lb_Y(cy), Lb_Y(11.0f), Ps_Rgba(0x5C, 0xA8, 0x6C, 0x80), Ps_Rgba(0x2C, 0x6C, 0x3C, 0x80));
+            Ps_Pill(TBO_LB2_BTN_BLUE, Lb_X(1184.0f), Lb_Y(cy - 10.0f), Lb_X(1255.0f), Lb_Y(cy + 10.0f), 0x80);
+            shown++;
         }
     }
+    /* START */
+    Lb_Focus(LBI_START);
+    Lb_BoxPic(LBI_START, TBO_LB2_START, Lb_StartAct() == LB_ACT_START && !Tb_LobbyCanStart() ? 0x68 : 0x80);
 }
 
 /* One line of what happened (a note, or "Name: chat"), for the chat panel. */
@@ -3073,6 +3240,29 @@ static void Lb_LogLine(char *out, s32 e) {
 }
 
 /* The page's words (Tb_DrawLobbyText). */
+/* the design's colours of words: top, bottom, outline */
+#define LB_WHITE Ps_Rgba(0xFF, 0xFF, 0xFF, 0x80), Ps_Rgba(0xDC, 0xE6, 0xFF, 0x80), Ps_Rgba(0x08, 0x12, 0x26, 0x80)
+#define LB_GOLD Ps_Rgba(0xFF, 0xE6, 0x80, 0x80), Ps_Rgba(0xFF, 0x9C, 0x1E, 0x80), Ps_Rgba(0x3A, 0x16, 0x00, 0x80)
+#define LB_CYAN Ps_Rgba(0xA8, 0xEE, 0xFF, 0x80), Ps_Rgba(0x5C, 0xC8, 0xFF, 0x80), Ps_Rgba(0x06, 0x14, 0x2A, 0x80)
+#define LB_GREEN Ps_Rgba(0x9C, 0xFF, 0xB4, 0x80), Ps_Rgba(0x2E, 0xD0, 0x70, 0x80), Ps_Rgba(0x06, 0x20, 0x0E, 0x80)
+#define LB_RED Ps_Rgba(0xFF, 0x9C, 0x9C, 0x80), Ps_Rgba(0xE0, 0x3C, 0x3C, 0x80), Ps_Rgba(0x28, 0x06, 0x06, 0x80)
+#define LB_GREY Ps_Rgba(0xB4, 0xC0, 0xD8, 0x80), Ps_Rgba(0x8C, 0x9A, 0xB8, 0x80), Ps_Rgba(0x0A, 0x10, 0x20, 0x80)
+#define LB_BROWN Ps_Rgba(0x5C, 0x2C, 0x00, 0x80), Ps_Rgba(0x3C, 0x1C, 0x00, 0x80), Ps_Rgba(0xFF, 0xE8, 0x90, 0x80)
+
+/* A line of words at the design's place (x, the middle of its capitals y), in its colours; align 0 left, 1 centre,
+   2 right; squeezed to w (design pixels; 0 no limit). */
+static void Lb_Txt(f32 x, f32 y, char *s, f32 sc, f32 w, s32 align, u32 top, u32 bot, u32 line) {
+    Ps_Align(align);
+    Ps_TextEx(Lb_X(x), Ps_TextTop(Lb_Y(y), sc), s, sc, w > 0.0f ? Lb_X(x + w) - Lb_X(x) : 0.0f, top, bot, line);
+    Ps_Align(0);
+}
+
+/* The ranked tier of a rating (as the friends window's). */
+static char *Lb_Tier(s32 r) {
+    return r >= 1850 ? "ULTRA INSTINCT" : r >= 1700 ? "SUPER SAIYAN BLUE" : r >= 1550 ? "SUPER SAIYAN GOD" : r >= 1400 ? "SUPER SAIYAN 3"
+         : r >= 1250 ? "SUPER SAIYAN 2" : r >= 1100 ? "SUPER SAIYAN" : r >= 900 ? "SAIYAN" : "SAIBAMAN";
+}
+
 static void Lb_DrawText(void) {
     static char line[128];
     static char line2[64];
@@ -3090,8 +3280,11 @@ static void Lb_DrawText(void) {
     if (sTb->lbPick) {
         return;
     }
-    /* the code */
-    Ps_Text(Lb_X(36.0f), Ps_TextTop(Lb_Y(32.0f), 0.42f), "KAME HOUSE ARENA", 0.42f, 0.0f, 1);
+    if ((sTb->frames % 30) == 0) { /* (the friends service's view, twice a second: the rank, the record, the friends) */
+        PortFriends_View(&sLbFriends);
+    }
+    /* the arena's name and the code */
+    Lb_Txt(88.0f, 28.0f, "KAME HOUSE ARENA", 0.98f, 258.0f, 0, LB_GOLD);
     if (v->code[0] != 0) {
         Ps_Copy(line, "LOBBY  ", 128);
         Ps_Cat(line, v->code, 128);
@@ -3100,133 +3293,147 @@ static void Lb_DrawText(void) {
     } else {
         Ps_Copy(line, "LOBBY", 128);
     }
-    Ps_Text(Lb_X(36.0f), Ps_TextTop(Lb_Y(55.0f), 0.62f), line, 0.62f, Lb_X(320.0f) - Lb_X(36.0f), 0);
-    Ps_Align(1);
-    Lb_Box(LBI_COPY, &x0, &y0, &x1, &y1);
-    Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.46f), "COPY", 0.46f, x1 - x0 - 4.0f, sTb->lbFocus == LBI_COPY ? 1 : 0);
-    Lb_Box(LBI_LEAVE, &x0, &y0, &x1, &y1);
-    Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.5f), v->owner ? "CLOSE" : "LEAVE", 0.5f, x1 - x0 - 4.0f, sTb->lbFocus == LBI_LEAVE ? 1 : 0);
-    Ps_Align(0);
+    Lb_Txt(88.0f, 59.0f, line, 0.7f, 178.0f, 0, LB_WHITE);
+    /* the top bar: this player's ranked tier and rating, record, region */
+    if (sLbFriends.known && sLbFriends.wins + sLbFriends.losses > 0) {
+        Ps_Copy(line, Lb_Tier(sLbFriends.rating), 128);
+        sprintf(line2, "%d RP", (int)sLbFriends.rating);
+    } else {
+        Ps_Copy(line, "UNRANKED", 128);
+        Ps_Copy(line2, "PLAY A RANKED MATCH", 64);
+    }
+    Lb_Txt(436.0f, 27.0f, line, 0.6f, 112.0f, 0, LB_WHITE);
+    Lb_Txt(436.0f, 46.0f, line2, 0.39f, 112.0f, 0, LB_GREY);
+    sprintf(line, "W: %d   L: %d", (int)sLbFriends.wins, (int)sLbFriends.losses);
+    Lb_Txt(622.0f, 27.0f, line, 0.6f, 128.0f, 1, LB_WHITE);
+    if (sLbFriends.wins + sLbFriends.losses > 0) {
+        sprintf(line, "(%d%%)", (int)(sLbFriends.wins * 100 / (sLbFriends.wins + sLbFriends.losses)));
+    } else {
+        Ps_Copy(line, "NO MATCHES YET", 128);
+    }
+    Lb_Txt(622.0f, 46.0f, line, 0.42f, 128.0f, 1, LB_GREY);
+    Lb_Txt(756.0f, 27.0f, "WORLDWIDE", 0.6f, 62.0f, 0, LB_WHITE);
+    Lb_Txt(818.0f, 46.0f, "ONLINE", 0.4f, 0.0f, 2, LB_CYAN);
+    /* the microphone and the speaker */
+    for (it = LBI_MICT; it <= LBI_SPKT; it++) {
+        s32 on = it == LBI_MICT ? PortVoice_Mode() != 0 : PortVoice_SpeakerOn();
+
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        Ps_Align(1);
+        if (on) {
+            Ps_TextEx((x0 + x1) * 0.5f + (y1 - y0) * 0.4f, Ps_TextTop((y0 + y1) * 0.5f, 0.55f),
+                      it == LBI_MICT && PortVoice_Mode() == 2 ? "HOLD V" : "ON", 0.55f, x1 - x0 - (y1 - y0), LB_GREEN);
+        } else {
+            Ps_TextEx((x0 + x1) * 0.5f + (y1 - y0) * 0.4f, Ps_TextTop((y0 + y1) * 0.5f, 0.55f), "OFF", 0.55f, x1 - x0 - (y1 - y0), LB_RED);
+        }
+        Ps_Align(0);
+    }
     /* who watches */
     for (i = 2; i < LB_ROWS; i++) {
         watch += v->taken[i];
     }
     sprintf(line, v->entrants > 2 ? "PLACES 3-8" : "WATCHING %d/6", (int)watch);
-    Ps_Align(1);
-    Ps_Text(Lb_X(95.0f), Ps_TextTop(Lb_Y(117.0f), 0.42f), line, 0.42f, Lb_X(165.0f) - Lb_X(25.0f), 3);
-    Ps_Align(0);
+    Lb_Txt(66.0f, 110.0f, line, 0.56f, 130.0f, 0, LB_WHITE);
     for (it = LBI_W0; it < LBI_W0 + 6; it++) {
         i = Lb_Place(it);
         Lb_Box(it, &x0, &y0, &x1, &y1);
         if (v->taken[i]) {
-            f32 nx = x0 + (v->fighter[i] > 0 ? (y1 - y0) * 0.857f + 4.0f : 6.0f);
+            f32 nx = x0 + (v->fighter[i] > 0 ? (y1 - y0) * 0.857f + 4.0f : 8.0f);
 
-            Ps_Text(nx, Ps_TextTop((y0 + y1) * 0.5f, 0.46f), v->name[i], 0.46f, x1 - nx - 3.0f, sTb->lbFocus == it ? 1 : i == v->me ? 3 : 0);
-        } else {
+            Ps_TextEx(nx, Ps_TextTop((y0 + y1) * 0.5f, 0.5f), v->name[i], 0.5f, x1 - nx - 4.0f, i == v->me ? Ps_Rgba(0xFF, 0xE6, 0x80, 0x80) : Ps_Rgba(0xFF, 0xFF, 0xFF, 0x80),
+                      Ps_Rgba(0xDC, 0xE6, 0xFF, 0x80), Ps_Rgba(0x08, 0x12, 0x26, 0x80));
+        } else if (i != sTb->lbPicked) {
             Ps_Align(1);
-            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.42f), i == sTb->lbPicked ? "" : "+ invite", 0.42f, 0.0f, sTb->lbFocus == it ? 1 : 4);
+            Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.52f), "+  Invite", 0.52f, 0.0f, LB_GREY);
             Ps_Align(0);
         }
     }
-    /* the players: name, the leader's crown, ready */
+    /* the two players: name, fighter, the badge's P1 / P2 */
     for (it = LBI_P1; it <= LBI_P2; it++) {
+        f32 dx = it == LBI_P1 ? 0.0f : 344.0f;
+
         i = Lb_Place(it);
-        Lb_Box(it, &x0, &y0, &x1, &y1);
-        Ps_Align(1);
         if (v->taken[i]) {
-            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.36f, 0.62f), v->name[i], 0.62f, x1 - x0 - 10.0f, sTb->lbFocus == it ? 1 : 0);
-            line2[0] = 0;
-            if (v->isOwner[i]) {
-                Ps_Copy(line2, "LEADER", 64); /* (the crown: the lobby's owner, BGMI's leader) */
+            Lb_Txt(397.0f + dx, 122.0f, it == LBI_P1 ? "P1" : "P2", 0.6f, 0.0f, 1, LB_GOLD);
+            Lb_Txt(490.0f + dx, 113.0f, v->name[i], 0.63f, 130.0f, 1, LB_WHITE);
+            line[0] = 0;
+            if (v->fighter[i] > 0) {
+                const char *fn = Port_FighterNameEn(v->fighter[i] - 1);
+
+                if (fn != NULL) { /* (not `?:` between a name and a literal: the 32-bit pointers) */
+                    Ps_Copy(line, (char *)fn, 128);
+                }
             }
             if (i == v->me) {
-                Ps_Cat(line2, line2[0] != 0 ? "  YOU" : "YOU", 64);
+                Ps_Cat(line, line[0] != 0 ? "  -  YOU" : "YOU", 128);
             }
-            if (v->ready[i] && !v->mode) {
-                Ps_Cat(line2, line2[0] != 0 ? "  READY" : "READY", 64);
-            }
-            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.76f, 0.38f), line2, 0.38f, x1 - x0 - 10.0f, v->ready[i] ? 5 : 1);
-            if (v->isOwner[i]) { /* a crown over the plate */
-                f32 cx = (x0 + x1) * 0.5f;
-                f32 cy = y0 - 5.0f;
-                u32 g = Ps_Rgba(0xFF, 0xD2, 0x3C, 0x80);
-
-                Ps_Quad(cx - 9.0f, cy + 3.0f, cx + 9.0f, cy + 3.0f, cx - 9.0f, cy - 4.0f, cx + 9.0f, cy - 4.0f, g, g, g, g);
-                Ps_Quad(cx - 9.0f, cy - 4.0f, cx - 6.0f, cy - 4.0f, cx - 9.0f, cy - 10.0f, cx - 9.0f, cy - 10.0f, g, g, g, g);
-                Ps_Quad(cx - 2.5f, cy - 4.0f, cx + 2.5f, cy - 4.0f, cx, cy - 12.0f, cx, cy - 12.0f, g, g, g, g);
-                Ps_Quad(cx + 6.0f, cy - 4.0f, cx + 9.0f, cy - 4.0f, cx + 9.0f, cy - 10.0f, cx + 9.0f, cy - 10.0f, g, g, g, g);
-            }
+            Lb_Txt(490.0f + dx, 134.0f, line, 0.46f, 130.0f, 1, LB_CYAN);
             if (v->talking[i]) {
-                Ps_Align(0);
-                Ps_Text(x1 + 6.0f, Ps_TextTop((y0 + y1) * 0.5f, 0.36f), "speaking", 0.36f, 0.0f, 1);
-                Ps_Align(1);
+                Lb_Txt(562.0f + dx, 124.0f, "speaking", 0.4f, 0.0f, 0, LB_GOLD);
             }
         } else {
-            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.56f), "+ INVITE", 0.56f, 0.0f, sTb->lbFocus == it ? 1 : 4);
+            Lb_Txt(466.0f + dx, 124.0f, "+  INVITE", 0.72f, 0.0f, 1, sTb->lbFocus == it ? Ps_Rgba(0xFF, 0xE6, 0x80, 0x80) : Ps_Rgba(0xFF, 0xFF, 0xFF, 0x80),
+                   Ps_Rgba(0xDC, 0xE6, 0xFF, 0x80), Ps_Rgba(0x08, 0x12, 0x26, 0x80));
         }
-        Ps_Align(0);
     }
-    if (v->taken[0] && v->taken[1]) {
-        Ps_Align(1);
-        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(330.0f), 1.6f), "VS", 1.6f, 0.0f, 1);
-        Ps_Align(0);
+    /* VS, or the leader's countdown */
+    if (sTb->lbCount > 0) {
+        Lb_Txt(643.0f, 287.0f, sTb->lbCount > 120 ? "3" : sTb->lbCount > 60 ? "2" : "1", 4.6f, 0.0f, 1, LB_GOLD);
+        Lb_Txt(643.0f, 360.0f, "TRIANGLE: CALL IT OFF", 0.5f, 0.0f, 1, LB_WHITE);
+    } else {
+        Lb_Txt(643.0f, 287.0f, "VS", 3.8f, 0.0f, 1, Ps_Rgba(0xFF, 0xF4, 0x90, 0x80), Ps_Rgba(0xFF, 0x7A, 0x10, 0x80), Ps_Rgba(0x6C, 0x10, 0x00, 0x80));
     }
     if (v->phase || v->tour != 0) {
-        Ps_Align(1);
-        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(80.0f), 0.5f), v->phase ? "A MATCH IS ON" : v->tour == 1 ? "TOURNAMENT ON" : "TOURNAMENT OVER", 0.5f, 0.0f, 5);
-        Ps_Align(0);
+        Lb_Txt(643.0f, 84.0f, v->phase ? "A MATCH IS ON" : v->tour == 1 ? "TOURNAMENT ON" : "TOURNAMENT OVER", 0.52f, 0.0f, 1, LB_GOLD);
     }
-    /* the round buttons' letters and names */
+    /* the round buttons' names */
     for (it = LBI_MIC; it <= LBI_QUICK; it++) {
-        static char *const kIcon[5] = {"M", "S", "+", "R", "Q"};
-        char *name = "INVITE";
+        char *name = it == LBI_INVITE ? "INVITE" : it == LBI_RANK ? "RANKING" : "QUICK CHAT";
 
         if (it == LBI_MIC) {
-            name = PortVoice_Mode() == 1 ? "MIC: ON" : PortVoice_Mode() == 2 ? "MIC: HOLD V" : "MIC: OFF";
+            name = PortVoice_Mode() == 1 ? "MIC" : PortVoice_Mode() == 2 ? "HOLD V" : "MIC OFF";
         } else if (it == LBI_SPK) {
             name = PortVoice_SpeakerOn() ? "SPEAKER" : "SPEAKER OFF";
-        } else if (it == LBI_RANK) {
-            name = "RANKING";
-        } else if (it == LBI_QUICK) {
-            name = "QUICK CHAT";
         }
         Lb_Box(it, &x0, &y0, &x1, &y1);
         Ps_Align(1);
-        Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.9f), kIcon[it - LBI_MIC], 0.9f, 0.0f, 0);
-        Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y1 + 9.0f, 0.36f), name, 0.36f, x1 - x0 + 14.0f, sTb->lbFocus == it ? 1 : 0);
-        Ps_Align(0);
-    }
-    if (sTb->lbQuick) { /* the quick messages */
-        Ps_Text(Lb_X(44.0f), Ps_TextTop(Lb_Y(130.0f), 0.42f), "QUICK CHAT: ONE PRESS SENDS IT", 0.42f, 0.0f, 2);
-        for (i = 0; i < LB_QUICK_N; i++) {
-            Lb_QuickBox(i, &x0, &y0, &x1, &y1);
-            Ps_Text(x0 + 12.0f, Ps_TextTop((y0 + y1) * 0.5f, 0.5f), kLbQuick[i], 0.5f, x1 - x0 - 20.0f, i == sTb->lbQuickCur ? 1 : 0);
+        if (sTb->lbFocus == it) {
+            Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop(Lb_Y(500.0f), 0.42f), name, 0.42f, x1 - x0 + 16.0f, LB_GOLD);
+        } else {
+            Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop(Lb_Y(500.0f), 0.42f), name, 0.42f, x1 - x0 + 16.0f, LB_WHITE);
         }
-    }
-    if (sTb->lbCount > 0) { /* the leader's countdown */
-        Ps_Align(1);
-        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(330.0f), 3.2f), sTb->lbCount > 120 ? "3" : sTb->lbCount > 60 ? "2" : "1", 3.2f, 0.0f, 1);
-        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(420.0f), 0.5f), "TRIANGLE: CALL IT OFF", 0.5f, 0.0f, 3);
         Ps_Align(0);
     }
     /* the chat: the last three things that happened */
-    Lb_Box(LBI_CHAT, &x0, &y0, &x1, &y1);
     for (i = 0; i < 3; i++) {
         s32 e = v->logCount - 3 + i;
 
         if (e >= 0) {
             Lb_LogLine(line, e);
-            Ps_Text(x0 + 8.0f, Ps_TextTop(y0 + 13.0f + 16.0f * (f32)i, 0.42f), line, 0.42f, x1 - x0 - 16.0f, 0);
+            Lb_Txt(28.0f, 574.0f + 22.0f * (f32)i, line, 0.52f, 318.0f, 0, LB_WHITE);
         }
     }
-    Ps_Align(2);
-    Ps_Text(x1 - 6.0f, Ps_TextTop(y1 - 7.0f, 0.32f), "CHAT", 0.32f, 0.0f, sTb->lbFocus == LBI_CHAT ? 1 : 3);
-    Ps_Align(0);
+    /* the quick chat */
+    Lb_Txt(406.0f, 555.0f, "QUICK CHAT", 0.53f, 0.0f, 0, LB_WHITE);
+    for (i = 0; i < LB_QUICK_N; i++) {
+        Lb_QuickBox(i, &x0, &y0, &x1, &y1);
+        Ps_Align(1);
+        if (sTb->lbQuick && i == sTb->lbQuickCur) {
+            Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.4f), kLbQuick[i], 0.4f, x1 - x0 - 4.0f, LB_GOLD);
+        } else {
+            Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.4f), kLbQuick[i], 0.4f, x1 - x0 - 4.0f, LB_WHITE);
+        }
+        Ps_Align(0);
+    }
+    /* the tiles' own words are in their pictures: what is new about them */
+    Lb_Txt(677.0f, 590.0f, "SOON", 0.34f, 0.0f, 2, LB_GOLD);
+    if (v->mode == 1) {
+        Lb_Txt(767.0f, 590.0f, "ON", 0.34f, 0.0f, 2, LB_GREEN);
+    }
     if (sTb->lbRules) { /* (the right side, under the rules window: left out) */
         goto lb_start;
     }
     /* the map card */
-    Lb_Box(LBI_MAP, &x0, &y0, &x1, &y1);
     if (v->stage >= 0) {
         extern const char *Port_StageNameEn(int stage); /* gs/fight_panels_ui.cpp */
         const char *nm = Port_StageNameEn(v->stage);
@@ -3237,90 +3444,75 @@ static void Lb_DrawText(void) {
             Ps_Copy(line, "STAGE", 128);
         }
     } else {
-        Ps_Copy(line, "PLAYERS CHOOSE THE MAP", 128);
+        Ps_Copy(line, "PLAYERS CHOOSE", 128);
     }
-    Ps_Text(Lb_X(992.0f), Ps_TextTop(Lb_Y(265.0f), 0.56f), line, 0.56f, x1 - Lb_X(992.0f) - 6.0f, sTb->lbFocus == LBI_MAP ? 1 : 0);
-    Ps_Text(Lb_X(992.0f), Ps_TextTop(Lb_Y(286.0f), 0.34f), v->owner ? "MAP: CLICK OR PRESS TO CHANGE" : "MAP: THE LEADER PICKS", 0.34f, x1 - Lb_X(992.0f) - 6.0f, 3);
+    Lb_Txt(1002.0f, 203.0f, line, 0.78f, 250.0f, 0, LB_WHITE);
+    Lb_Txt(1019.0f, 228.0f, v->owner ? "MAP: CLICK TO CHANGE (LEADER ONLY)" : "MAP: THE LEADER PICKS", 0.39f, 236.0f, 0, LB_WHITE);
     /* the rules */
-    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(330.0f), 0.42f), "RULES", 0.42f, 0.0f, sTb->lbFocus == LBI_RULES ? 1 : 2);
-    Tb_RuleValue(line, 1);
-    Tb_RuleValue(line2, 2);
-    Ps_Cat(line, "   ", 128);
-    Ps_Cat(line, line2, 128);
-    Tb_RuleValue(line2, 3);
-    Ps_Cat(line, "   SPEED ", 128);
-    Ps_Cat(line, line2, 128);
-    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(356.0f), 0.38f), line, 0.38f, Lb_X(1250.0f) - Lb_X(995.0f), 0);
-    Tb_RuleValue(line, 4);
-    Tb_RuleValue(line2, 5);
-    Ps_Cat(line, "   ", 128);
-    Ps_Cat(line, line2, 128);
-    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(380.0f), 0.38f), line, 0.38f, Lb_X(1250.0f) - Lb_X(995.0f), 0);
-    /* CHANGE FIGHTER */
-    Lb_Box(LBI_FIGHTER, &x0, &y0, &x1, &y1);
-    Ps_Align(1);
-    Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.6f), "CHANGE FIGHTER", 0.6f, x1 - x0 - 10.0f, sTb->lbFocus == LBI_FIGHTER ? 1 : 0);
-    Ps_Align(0);
-    /* the online friends (twice a second from the friends service) */
-    if ((sTb->frames % 30) == 0) {
-        PortFriends_View(&sLbFriends);
+    Lb_Txt(1030.0f, 268.0f, "RULES", 0.6f, 0.0f, 0, sTb->lbFocus == LBI_RULES ? Ps_Rgba(0xFF, 0xF4, 0xB0, 0x80) : Ps_Rgba(0xFF, 0xE6, 0x80, 0x80),
+           Ps_Rgba(0xFF, 0x9C, 0x1E, 0x80), Ps_Rgba(0x3A, 0x16, 0x00, 0x80));
+    for (i = 0; i < 5; i++) {
+        Tb_RuleValue(line2, i + 1);
+        Ps_Copy(line, i == 2 ? "SPEED " : i == 3 ? "ROLLBACK " : i == 4 ? "INPUT DELAY " : "", 128);
+        Ps_Cat(line, line2, 128);
+        Lb_Txt(1034.0f, 296.0f + 20.5f * (f32)i, line, 0.48f, 222.0f, 0, LB_WHITE);
     }
-    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(500.0f), 0.42f), "ONLINE FRIENDS", 0.42f, 0.0f, sTb->lbFocus == LBI_FRIENDS ? 1 : 2);
+    /* the online friends */
     {
         s32 shown = 0;
+        s32 online = 0;
         s32 k;
 
+        for (k = 0; k < sLbFriends.friendCount; k++) {
+            online += sLbFriends.friends[k].online != 0;
+        }
+        Lb_Txt(1030.0f, 460.0f, "ONLINE FRIENDS", 0.53f, 0.0f, 0, LB_WHITE);
+        if (online > 0) {
+            sprintf(line, "%d ONLINE", (int)online);
+            Lb_Txt(1144.0f, 460.0f, line, 0.53f, 0.0f, 0, LB_CYAN);
+        }
         for (k = 0; k < sLbFriends.friendCount && shown < 2; k++) {
             PortFriend *fr = &sLbFriends.friends[k];
+            f32 cy = 488.0f + 28.0f * (f32)shown;
 
             if (!fr->online) {
                 continue;
             }
-            Ps_Copy(line, fr->name, 128);
-            Ps_Cat(line, "   ", 128);
-            if (fr->state[0] != 0) { /* (not `?:` between the friend's word and a literal: the 32-bit pointers) */
-                Ps_Cat(line, fr->state, 128);
-            } else {
-                Ps_Cat(line, "online", 128);
-            }
-            Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(526.0f + 24.0f * (f32)shown), 0.38f), line, 0.38f, Lb_X(1180.0f) - Lb_X(995.0f), 5);
-            Ps_Align(2);
-            Ps_Text(Lb_X(1250.0f), Ps_TextTop(Lb_Y(526.0f + 24.0f * (f32)shown), 0.34f), "INVITE", 0.34f, 0.0f, 1);
-            Ps_Align(0);
+            line2[0] = fr->name[0];
+            line2[1] = 0;
+            Lb_Txt(1013.0f, cy, line2, 0.5f, 0.0f, 1, LB_WHITE);
+            Lb_Txt(1031.0f, cy, fr->name, 0.5f, 146.0f, 0, LB_WHITE);
+            Lb_Txt(1219.0f, cy, fr->state[0] != 0 ? "JOIN" : "INVITE", 0.42f, 0.0f, 1, LB_WHITE);
             shown++;
         }
-        if (shown == 0) {
-            Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(530.0f), 0.36f), sLbFriends.known ? "NO FRIEND ONLINE: PRESS TO ADD" : "PRESS TO OPEN FRIENDS", 0.36f,
-                    Lb_X(1250.0f) - Lb_X(995.0f), 4);
-        }
+        Lb_Txt(1127.0f, 541.0f, sLbFriends.known ? "No friend online: press to add" : "Press to open the friends", 0.38f, 250.0f, 1, LB_GREY);
     }
 lb_start:
-    /* START */
+    /* START: the countdown over it, the word, what it waits for */
     Lb_Box(LBI_START, &x0, &y0, &x1, &y1);
-    Ps_Align(1);
     {
         s32 act = Lb_StartAct();
         char *big = "START";
-        char *small = "both players ready";
+        char *small = "Both players ready";
 
         if (act == LB_ACT_READY) {
             big = "READY";
-            small = "tell the leader you are set";
+            small = "Tell the leader you are set";
         } else if (act == LB_ACT_BRACKET) {
             big = "BRACKET";
-            small = "the tournament's matches";
+            small = "The tournament's matches";
         } else if (act == LB_ACT_START && !Tb_LobbyCanStart()) {
-            small = "waiting for both players";
+            small = "Waiting for both players...";
         } else if (act == 0) {
             big = "WAIT";
-            small = "the leader starts the match";
+            small = "The leader starts the match";
         }
-        Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.4f, 1.5f), big, 1.5f, x1 - x0 - 12.0f, Ps_Rgba(0x5C, 0x2C, 0x00, 0x80),
-                  Ps_Rgba(0x3C, 0x1C, 0x00, 0x80), Ps_Rgba(0xFF, 0xE8, 0x90, 0x80));
-        Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.8f, 0.4f), small, 0.4f, x1 - x0 - 12.0f, Ps_Rgba(0x5C, 0x30, 0x00, 0x80),
-                  Ps_Rgba(0x5C, 0x30, 0x00, 0x80), Ps_Rgba(0xFF, 0xE8, 0x90, 0x00));
+        if (sTb->lbCount > 0) {
+            Lb_Txt(1125.0f, 594.0f, sTb->lbCount > 120 ? "-   3   -" : sTb->lbCount > 60 ? "-   2   -" : "-   1   -", 0.8f, 0.0f, 1, LB_BROWN);
+        }
+        Lb_Txt(1125.0f, 631.0f, big, 1.48f, 200.0f, 1, LB_BROWN);
+        Lb_Txt(1125.0f, 665.0f, small, 0.52f, 200.0f, 1, Ps_Rgba(0x5C, 0x30, 0x00, 0x80), Ps_Rgba(0x5C, 0x30, 0x00, 0x80), Ps_Rgba(0xFF, 0xE8, 0x90, 0x00));
     }
-    Ps_Align(0);
 }
 
 /* The rules window's rows under the mouse (the page's old right side): a rule 0..8, a button LB_BTN + k, -1 none;

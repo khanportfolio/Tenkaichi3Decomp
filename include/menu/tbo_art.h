@@ -27,6 +27,45 @@
     X(TBO_BTN_CIRCLE, "btn_circle") \
     X(TBO_BTN_START, "btn_start") \
     X(TBO_RADAR, "radar")                   /* the Dragon Radar of the search: its frames, 11 a row (src/menu/port_tbo.c Tb_Radar) */ \
+    X(TBO_LB2_GLASS, "lb2_glass") /* the lobby's new look (18 Nov 2026, tools/lobby_art.py) */ \
+    X(TBO_LB2_PLATE, "lb2_plate") \
+    X(TBO_LB2_TOPBAR, "lb2_topbar") \
+    X(TBO_LB2_BTN_DARK, "lb2_btn_dark") \
+    X(TBO_LB2_BTN_BLUE, "lb2_btn_blue") \
+    X(TBO_LB2_BADGE, "lb2_badge") \
+    X(TBO_LB2_START, "lb2_start") \
+    X(TBO_LB2_LOGO, "lb2_logo") \
+    X(TBO_LB2_R_MIC, "lb2_r_mic") \
+    X(TBO_LB2_R_MIC_OFF, "lb2_r_mic_off") \
+    X(TBO_LB2_R_SPK, "lb2_r_spk") \
+    X(TBO_LB2_R_SPK_OFF, "lb2_r_spk_off") \
+    X(TBO_LB2_R_INV, "lb2_r_inv") \
+    X(TBO_LB2_R_RANK, "lb2_r_rank") \
+    X(TBO_LB2_R_CHAT, "lb2_r_chat") \
+    X(TBO_LB2_F_DAILY, "lb2_f_daily") \
+    X(TBO_LB2_F_TOUR, "lb2_f_tour") \
+    X(TBO_LB2_F_HISTORY, "lb2_f_history") \
+    X(TBO_LB2_F_COSTUME, "lb2_f_costume") \
+    X(TBO_LB2_READY, "lb2_ready") \
+    X(TBO_LB2_CROWN, "lb2_crown") \
+    X(TBO_LB2_EMBLEM, "lb2_emblem") \
+    X(TBO_LB2_CHANGE, "lb2_change") \
+    X(TBO_LB2_COPY, "lb2_copy") \
+    X(TBO_LB2_LEAVE, "lb2_leave") \
+    X(TBO_LB2_CLOSE, "lb2_close") \
+    X(TBO_LB2_TABS, "lb2_tabs") \
+    X(TBO_LB2_CHATIN, "lb2_chatin") \
+    X(TBO_LB2_I_EYE, "lb2_i_eye") \
+    X(TBO_LB2_I_RULES, "lb2_i_rules") \
+    X(TBO_LB2_I_FRIENDS, "lb2_i_friends") \
+    X(TBO_LB2_I_PIN, "lb2_i_pin") \
+    X(TBO_LB2_I_BATTLE, "lb2_i_battle") \
+    X(TBO_LB2_I_TIME, "lb2_i_time") \
+    X(TBO_LB2_I_SPEED, "lb2_i_speed") \
+    X(TBO_LB2_I_ROLL, "lb2_i_roll") \
+    X(TBO_LB2_I_DELAY, "lb2_i_delay") \
+    X(TBO_LB2_I_GLOBE, "lb2_i_globe") \
+    X(TBO_LB2_I_BOLT, "lb2_i_bolt") \
     X(MM_BG, "mm_bg")               /* the Mod Manager's pictures (src/menu/port_mmkit.c), in mm_sizes.h's order */ \
     X(MM_BAR, "mm_bar") \
     X(MM_BAR_SEL, "mm_bar_sel") \

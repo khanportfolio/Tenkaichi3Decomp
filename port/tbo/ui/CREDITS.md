@@ -15,3 +15,6 @@ The pictures of the Tenkaichi Budokai Online screens (this folder; `tbo/ui/` in 
 
 A picture replaced by one of another size: run `python3 port/tools/tbo_sizes.py` (the screens lay the pictures out
 by their sizes, `include/menu/tbo_sizes.h`).
+
+- `lobby_bg.png` and the `lb2_*.png` pieces of the lobby (18 Nov 2026, this modded copy): the player's own design, made with an image AI;
+  cut and drawn by `port/tools/lobby_art.py`.
