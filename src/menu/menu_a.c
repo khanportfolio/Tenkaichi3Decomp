@@ -419,6 +419,8 @@ static void MmNew_Hide(MFlash *flash) {
     Flash_ClipSetFlags(flash, &ref, 2, 0);
 }
 
+static void MmNew_DrawButton(s32 a); /* (the credits's button, below) */
+
 static void MmNew_DrawList(void) {
     s32 a;
     s32 i;
