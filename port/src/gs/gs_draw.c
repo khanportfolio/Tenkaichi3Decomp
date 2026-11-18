@@ -181,7 +181,7 @@ uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs; /* time spent decoding textures, crea
 int gGsUploadCycle; /* (anim_step) the next texUpload refills a texture that may still be in use: the back end cycles it */
 /* The same for the picture being drawn only, where it is drawn (the render thread's, or the game's): BT3_DRAW_LOG
    (gs_gpu.c, draw_log). From the start of its list (GsGpu_ListStart). */
-uint64_t gDrawStartNs, gDrawTexNs, gDrawPipeNs, gDrawUpBytes, gDrawImgNs, gDrawLookNs, gDrawVuNs, gDrawXferNs;
+uint64_t gDrawStartNs, gDrawTexNs, gDrawPipeNs, gDrawUpBytes, gDrawImgNs, gDrawLookNs, gDrawVuNs, gDrawXferNs, gDrawTboNs;
 unsigned gDrawNewTex, gDrawImgMade, gDrawImgFreed, gDrawImgPooled; /* (the last three counted in gs_gpu.c: graphics-chip images, uploads) */
 int gDrawLogged; /* the picture's line is written (Smooth motion's other pictures of the list are not) */
 
@@ -253,7 +253,7 @@ static int menu_piece_moving(const Vtx *v, const Vtx *last, float x0, float x1, 
 void GsGpu_ListStart(void) {
     sMenuFree = 0;
     gDrawStartNs = SDL_GetTicksNS(); /* (gs_gpu.c's clock, where it is compared) */
-    gDrawTexNs = gDrawPipeNs = gDrawUpBytes = gDrawImgNs = gDrawLookNs = gDrawVuNs = gDrawXferNs = 0;
+    gDrawTexNs = gDrawPipeNs = gDrawUpBytes = gDrawImgNs = gDrawLookNs = gDrawVuNs = gDrawXferNs = gDrawTboNs = 0;
     gDrawNewTex = gDrawImgMade = gDrawImgFreed = gDrawImgPooled = 0;
     gDrawLogged = 0;
 }
@@ -580,6 +580,11 @@ static int png_worker(void *unused) {
                 png = SDL_LoadPNG(sPngJob[k].path[j]);
             }
         }
+        if (png != NULL && png->format != SDL_PIXELFORMAT_RGBA32) { /* (the conversion here too, not in a frame) */
+            SDL_Surface *r = SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32);
+            SDL_DestroySurface(png);
+            png = r;
+        }
         SDL_LockMutex(sPngLock);
         sPngJob[k].done = png;
         sPngJob[k].state = 2;
@@ -664,8 +669,8 @@ static GsTex tbo_extra_texture(uint32_t id) {
         png = png_async(id, path, rel, NULL, &wait);
         if (wait) return clear_tex(); /* (still being read: nothing this frame) */
     }
-    rgba = png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
-    if (png != NULL) SDL_DestroySurface(png);
+    rgba = png != NULL && png->format == SDL_PIXELFORMAT_RGBA32 ? png : png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
+    if (png != NULL && png != rgba) SDL_DestroySurface(png);
     if (rgba == NULL) {
         sExtraMissing[k] = 1;
         return gsWhite;
@@ -736,8 +741,8 @@ static GsTex tbo_texture(uint32_t id) {
             return clear_tex(); /* (still being read: nothing this frame) */
         }
     }
-    rgba = png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
-    if (png != NULL) {
+    rgba = png != NULL && png->format == SDL_PIXELFORMAT_RGBA32 ? png : png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
+    if (png != NULL && png != rgba) {
         SDL_DestroySurface(png);
     }
     if (native == NULL && rgba == NULL) {
@@ -1570,7 +1575,9 @@ static int draw_state(int ctx, int topo, int sprite, int vu, GsDraw *d, float *u
         gsTargets[d->target].stale = 0; /* cleared by the game: what is drawn into it from here on is real */
     }
     if (tme && ((t0 >> 20) & 0x3F) == TBO_PSM) {
+        uint64_t tt0 = gpu_now();
         d->tex = tbo_texture((uint32_t)((t0 >> 37) & 0x3FFF)); /* a Tenkaichi Budokai Online picture (above texture_get) */
+        gDrawTboNs += gpu_now() - tt0; /* (BT3_DRAW_LOG) */
     } else if (tme) {
         int kept = 0;
         src = GsDraw_TargetGet((uint32_t)((t0 & 0x3FFF) / 32), 0);
