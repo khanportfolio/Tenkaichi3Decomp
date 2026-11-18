@@ -3085,6 +3085,11 @@ static void Lb_DrawText(void) {
     s32 i;
     s32 watch = 0;
 
+    /* 18 Nov 2026 (the user's screenshots: the page's words over the pickers and the rules window): the words are
+       drawn after every picture, so what a window covers is left out here: all of the page under a picker */
+    if (sTb->lbPick) {
+        return;
+    }
     /* the code */
     Ps_Text(Lb_X(36.0f), Ps_TextTop(Lb_Y(32.0f), 0.42f), "KAME HOUSE ARENA", 0.42f, 0.0f, 1);
     if (v->code[0] != 0) {
@@ -3217,6 +3222,9 @@ static void Lb_DrawText(void) {
     Ps_Align(2);
     Ps_Text(x1 - 6.0f, Ps_TextTop(y1 - 7.0f, 0.32f), "CHAT", 0.32f, 0.0f, sTb->lbFocus == LBI_CHAT ? 1 : 3);
     Ps_Align(0);
+    if (sTb->lbRules) { /* (the right side, under the rules window: left out) */
+        goto lb_start;
+    }
     /* the map card */
     Lb_Box(LBI_MAP, &x0, &y0, &x1, &y1);
     if (v->stage >= 0) {
@@ -3286,6 +3294,7 @@ static void Lb_DrawText(void) {
                     Lb_X(1250.0f) - Lb_X(995.0f), 4);
         }
     }
+lb_start:
     /* START */
     Lb_Box(LBI_START, &x0, &y0, &x1, &y1);
     Ps_Align(1);
@@ -3531,6 +3540,14 @@ static void Lb_PickUpdate(s32 live) {
     }
 }
 
+/* A plain frame t thick around a box (18 Nov 2026: the rounded pills under the square pictures looked broken). */
+static void Lb_Frame(f32 x0, f32 y0, f32 x1, f32 y1, f32 t, u32 c) {
+    Ps_Quad(x0 - t, y0 - t, x1 + t, y0 - t, x0 - t, y0, x1 + t, y0, c, c, c, c);
+    Ps_Quad(x0 - t, y1, x1 + t, y1, x0 - t, y1 + t, x1 + t, y1 + t, c, c, c, c);
+    Ps_Quad(x0 - t, y0, x0, y0, x0 - t, y1, x0, y1, c, c, c, c);
+    Ps_Quad(x1, y0, x1 + t, y0, x1, y1, x1 + t, y1, c, c, c, c);
+}
+
 static void Lb_PickDraw(void) {
     PortLobbyView *v = &sTbLv;
     s32 n = Lb_PickCount();
@@ -3551,10 +3568,10 @@ static void Lb_PickDraw(void) {
         if (!Lb_PickBox(i, &x0, &y0, &x1, &y1)) {
             continue;
         }
-        if (i == sTb->lbPickCur) {
-            Ps_Pill(TBO_KIT_SEL, x0 - 2.0f, y0 - 2.0f, x1 + 2.0f, y1 + 2.0f, 0x80);
-        } else if (chosen) {
-            Ps_Pill(TBO_KIT_GOLD, x0 - 1.0f, y0 - 1.0f, x1 + 1.0f, y1 + 1.0f, 0x80);
+        if (i == sTb->lbPickCur) { /* (a light behind the one under the cursor) */
+            u32 glow = Ps_Rgba(0xFF, 0xD8, 0x40, 0x30);
+
+            Ps_Quad(x0, y0, x1, y0, x0, y1, x1, y1, glow, glow, glow, glow);
         }
         if (sTb->lbPick == 1) {
             Ps_Sprite(TBO_FACE_BASE + id, x0 + 1.0f, y0 + 1.0f, x1 - 1.0f, y1 - 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
@@ -3562,6 +3579,11 @@ static void Lb_PickDraw(void) {
             Ps_Sprite(TBO_STAGE_BASE + id, x0 + 1.0f, y0 + 1.0f, x1 - 1.0f, y1 - 15.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
         } else {
             Ps_Pill(TBO_KIT_BAR, x0 + 1.0f, y0 + 1.0f, x1 - 1.0f, y1 - 15.0f, 0x80);
+        }
+        if (i == sTb->lbPickCur) {
+            Lb_Frame(x0, y0, x1, y1, 1.6f, Ps_Rgba(0xFF, 0xE0, 0x30, 0x80));
+        } else if (chosen) {
+            Lb_Frame(x0, y0, x1, y1, 0.9f, Ps_Rgba(0x50, 0xE0, 0x70, 0x80));
         }
     }
 }
@@ -3866,7 +3888,13 @@ static void Tb_LobbyUpdate(s32 live) {
         if (hit >= 0 && (own || hit >= LB_MINE || hit >= LB_BTN) && (ev & 3)) {
             sTb->lbRight = hit;
             if (ev & 2) {
-                if (hit < LB_BTN) {
+                if (hit < LB_BTN && sTbLv.phase == 0 && ((Tb_LbRule(hit) == LOBBY_RULE_STAGE && own) || Tb_LbRule(hit) == TB_RULE_FIGHTER)) {
+                    /* 18 Nov 2026 (the user: "I click some map, it selects some other"): a click on Stage or My
+                       Fighter stepped to the next one in the list; it opens the pictures to choose from instead */
+                    sTb->lbRules = 0;
+                    Lb_PickOpen(Tb_LbRule(hit) == LOBBY_RULE_STAGE ? 2 : 1);
+                    return;
+                } else if (hit < LB_BTN) {
                     pad->gameRepeat |= PADG_RIGHT; /* (a click on a rule: its next value) */
                 } else {
                     pad->gamePressed |= PADG_CROSS;

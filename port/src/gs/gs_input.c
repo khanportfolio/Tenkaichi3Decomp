@@ -81,8 +81,10 @@ static void defaults(int player) {
         sKeys[player][a] = player == 0 ? kActions[a].key : 0;
         if (a < PORT_PAD_BUTTONS) {
             sPadBtn[player][a] = kActions[a].pad;
+            /* (18 Nov 2026, the user: a click of the wheel punches, as J does) */
             sMouse[player][a] = player == 0 && kActions[a].bit == B_L2 ? SDL_BUTTON_RIGHT :
-                                player == 0 && kActions[a].bit == B_TRIANGLE ? SDL_BUTTON_LEFT : 0;
+                                player == 0 && kActions[a].bit == B_TRIANGLE ? SDL_BUTTON_LEFT :
+                                player == 0 && kActions[a].bit == B_SQUARE ? SDL_BUTTON_MIDDLE : 0;
         }
     }
     sPadSlot[player] = player;
@@ -140,8 +142,16 @@ int *PortInput_OverlayKey(void) { pthread_once(&sLoadOnce, load); return &sOverl
 int *PortInput_OverlayPad(void) { pthread_once(&sLoadOnce, load); return &sOverlayPad; }
 
 /* 1 = this event opens or closes the settings window. */
+/* 18 Nov 2026 (the user: "when someone scrolls the mouse wheel, the player should punch, the same as J"): each notch
+   of the wheel is one press of player 1's Square (J), held 70 ms with 50 ms between, at most four waiting; in a
+   fight only (Port_PadRead). Written here, where every event passes, read by the pad's reader. */
+static SDL_AtomicInt sWheelQueue;
+
 int PortInput_Hotkey(const SDL_Event *ev) {
     pthread_once(&sLoadOnce, load);
+    if (ev->type == SDL_EVENT_MOUSE_WHEEL && ev->wheel.y != 0.0f && SDL_GetAtomicInt(&sWheelQueue) < 4) {
+        SDL_AddAtomicInt(&sWheelQueue, 1);
+    }
     if (ev->type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
         (ev->gbutton.button == SDL_GAMEPAD_BUTTON_START || ev->gbutton.button == SDL_GAMEPAD_BUTTON_BACK)) {
         sComboLatch = 0;
@@ -1146,6 +1156,20 @@ int Port_PadRead(int socket, unsigned char *data) {
         {   /* the mouse buttons (sMouse), in a fight only */
             extern void *BtlChar_FindByObjId(int objId);
             SDL_MouseButtonFlags mb = SDL_GetMouseState(NULL, NULL);
+            if (socket == 0) { /* the wheel's punches (sWheelQueue) */
+                static Uint64 pressUntil, gapUntil;
+                Uint64 now = SDL_GetTicks();
+                if (BtlChar_FindByObjId(0) == NULL) {
+                    SDL_SetAtomicInt(&sWheelQueue, 0); /* (scrolling in the menus punches nobody later) */
+                } else if (now >= gapUntil && SDL_GetAtomicInt(&sWheelQueue) > 0) {
+                    SDL_AddAtomicInt(&sWheelQueue, -1);
+                    pressUntil = now + 70;
+                    gapUntil = now + 120;
+                }
+                if (now < pressUntil) {
+                    btn |= B_SQUARE;
+                }
+            }
             if (mb != 0 && BtlChar_FindByObjId(0) != NULL) {
                 for (a = 0; a < PORT_PAD_BUTTONS; a++) {
                     if (sMouse[socket][a] > 0 && (mb & SDL_BUTTON_MASK(sMouse[socket][a]))) {
