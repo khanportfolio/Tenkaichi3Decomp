@@ -291,6 +291,21 @@ s32 Movie_PlayTitle(void) {
     } while (!sMovieSkipped);
     return 1;
 }
+
+/* 19 Nov 2026 (the user's own clip): a console start-up movie before everything else
+   (mods/disc/DATA/ZS3USPS.PSS and .ADX), its first 3.5 seconds not skippable. 0 when there is none. */
+s32 Movie_PlayBoot(void) {
+    char path[512];
+
+    if (!GsGpu_Enabled() || !Port_FilePath(0, 0, "ZS3USPS.PSS", path, sizeof(path))) {
+        return 0;
+    }
+    Movie_Open("zs3usps.pss", "zs3usps.adx");
+    sMovieNoSkip = 105;
+    Movie_Run();
+    Movie_Close();
+    return 1;
+}
 #endif
 
 /* Plays the ending movie. */

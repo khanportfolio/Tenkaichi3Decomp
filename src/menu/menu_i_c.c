@@ -183,6 +183,11 @@ s32 FirstRun_Main(void) {
 
 #ifdef PORT
     PortLanguage_Run(); /* first choose a language in the game window, before loading the game partition */
+    if (FIRSTRUN_SHOW("skip_console_logo")) { /* the console's start-up clip, when installed (sys/movie.c) */
+        extern s32 Movie_PlayBoot(void);
+
+        Movie_PlayBoot();
+    }
 #endif
     File_LoadPartitionNw(2);
     FirstRun_WaitPad(0, 0);
