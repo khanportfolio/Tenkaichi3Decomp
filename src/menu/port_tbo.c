@@ -396,6 +396,8 @@ typedef struct TboScreen {
     s32 lbPopCur;
     s32 lbPopPlace;     /* (the place the owner's window is about) */
     s32 lbChat;         /* the keypad for a line of chat is up */
+    s32 lbFocus;        /* (this modded copy) the page's button under the cursor (LBI_), -1 not yet */
+    s32 lbRules;        /* (this modded copy) the rules window (the old right side) is over the page */
     s32 lbPopT;         /* frames since the window over the page opened */
     s32 lbPopClose;     /* frames left of its going (it slides out, then is gone) */
     s32 lbHostPose;     /* the hosts of the page the lobby's came from, who leave as it comes in (-1 none) */
@@ -2210,6 +2212,8 @@ static void Tb_LobbyOpen(void) {
     sTb->lbCol = 0;
     sTb->lbPlace = 0;
     sTb->lbRight = LB_BTN;
+    sTb->lbFocus = -1;
+    sTb->lbRules = 0;
     sTb->lbPicked = -1;
     sTb->lbPop = 0;
     sTb->lbChat = 0;
@@ -2436,18 +2440,819 @@ static void Tb_ChatUpdate(void) {
 }
 
 /* The owner's window over a place: Move, Remove from the Lobby (not for the owner's own place), Back. */
+/* ---- (this modded copy, 18 Nov 2026) the lobby as the user's approved mockup ("make it exactly like this", BGMI style)
+ * Desktop\dragon ball z\Lobby mockup (BGMI style).png: the code at the top left, LEAVE at the top right, who watches
+ * down the left, the two players standing in 3D in the middle (their names and the leader's crown over them), round
+ * MIC / SPEAKER / INVITE / RANKING buttons and the chat at the lower left, the map card, the rules, Change Fighter,
+ * the online friends and a big START down the right. Every button takes the controller (the arrows go to the
+ * nearest button that way, cross presses it) and the mouse (pointing selects, a click presses). The rules, the
+ * stage and the fighter are changed in the rules window (the page's old right side, over the page).
+ * The mockup's 1280 x 720 places are spread over the whole window (its left and right edges), as the mockup was
+ * drawn for a 16:9 screen. */
+#include "../../port/src/gs/net_friends.h" /* (the online friends: plain C, no pointers in its view) */
+extern s32 Mm_PairIsOpen(void);
+extern void Mm_PairOpen(void);
+extern void Mm_PairClose(void);
+extern void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree);
+extern void Mm_PairDrawFrac(f32 x, f32 feet, f32 h, s32 *ready0, s32 *ready1);
+extern int Port_MenuPointerPoll(void);
+extern f32 cosf(f32 x); /* (the C library's: no math.h in the game's files) */
+extern f32 sinf(f32 x);
+extern int Port_MenuPointerX(void);
+extern int Port_MenuPointerY(void);
+extern int PortVoice_Mode(void);
+extern int PortVoice_SpeakerOn(void);
+extern void PortVoice_ModeSet(int mode);
+extern void PortVoice_SpeakerSet(int on);
+extern int Port_NetSession(void);
+
+enum {
+    LBI_COPY, LBI_LEAVE, LBI_P1, LBI_P2, LBI_W0, LBI_MIC = LBI_W0 + 6, LBI_SPK, LBI_INVITE, LBI_RANK, LBI_CHAT,
+    LBI_MAP, LBI_RULES, LBI_FIGHTER, LBI_FRIENDS, LBI_START, LBI_COUNT
+};
+/* the mockup's boxes (1280 x 720 pixels) */
+static const s16 kLbBox[LBI_COUNT][4] = {
+    {340, 26, 420, 60},     /* COPY */
+    {1150, 16, 1260, 60},   /* LEAVE */
+    {365, 108, 575, 160},   /* player 1's name plate */
+    {705, 108, 915, 160},   /* player 2's */
+    {32, 136, 158, 176}, {32, 184, 158, 224}, {32, 232, 158, 272}, {32, 280, 158, 320}, {32, 328, 158, 368}, {32, 376, 158, 416},
+    {42, 492, 98, 548},     /* MIC (round) */
+    {112, 492, 168, 548},   /* SPEAKER */
+    {182, 492, 238, 548},   /* INVITE */
+    {252, 492, 308, 548},   /* RANKING */
+    {20, 580, 380, 700},    /* the chat */
+    {980, 90, 1260, 300},   /* the map card */
+    {980, 312, 1260, 400},  /* the rules */
+    {980, 412, 1260, 462},  /* CHANGE FIGHTER */
+    {980, 480, 1260, 570},  /* the online friends */
+    {980, 590, 1260, 690},  /* START */
+};
+#define LB_SQUAD_X1 470.0f  /* player 1's feet across (player 2: 1280 - this) */
+#define LB_SQUAD_FEET 585.0f
+#define LB_SQUAD_H 420.0f
+static s32 sLb3d[2];               /* a side's model stands (its picture is not drawn) */
+static PortFriendsView sLbFriends; /* (read twice a second) */
+
+static f32 Lb_X(f32 px) { /* the mockup's x over the whole window */
+    f32 l = Ps_Left();
+
+    return l + px * (512.0f - 2.0f * l) / 1280.0f;
+}
+
+static f32 Lb_Y(f32 py) {
+    return py * 448.0f / 720.0f;
+}
+
+static void Lb_Box(s32 it, f32 *x0, f32 *y0, f32 *x1, f32 *y1) {
+    *x0 = Lb_X((f32)kLbBox[it][0]);
+    *y0 = Lb_Y((f32)kLbBox[it][1]);
+    *x1 = Lb_X((f32)kLbBox[it][2]);
+    *y1 = Lb_Y((f32)kLbBox[it][3]);
+}
+
+/* The place a box is about (the players' plates, the watchers' rows), -1 none. */
+static s32 Lb_Place(s32 it) {
+    if (it == LBI_P1) {
+        return 0;
+    }
+    if (it == LBI_P2) {
+        return 1;
+    }
+    if (it >= LBI_W0 && it < LBI_W0 + 6) {
+        return 2 + (it - LBI_W0);
+    }
+    return -1;
+}
+
+/* The button under the mouse, -1 none (the pointer's game pixels to the page's units). */
+static s32 Lb_Hit(void) {
+    s32 px = Port_MenuPointerX();
+    s32 py = Port_MenuPointerY();
+    f32 ax = Ps_X(0.0f);
+    f32 bx = Ps_X(512.0f);
+    f32 ay = Ps_Y(0.0f);
+    f32 by = Ps_Y(448.0f);
+    f32 x;
+    f32 y;
+    s32 it;
+
+    if (px < 0 || bx - ax < 1.0f || by - ay < 1.0f) {
+        return -1;
+    }
+    x = ((f32)px - ax) * 512.0f / (bx - ax);
+    y = ((f32)py - ay) * 448.0f / (by - ay);
+    for (it = 0; it < LBI_COUNT; it++) {
+        f32 x0;
+        f32 y0;
+        f32 x1;
+        f32 y1;
+
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+            return it;
+        }
+    }
+    return -1;
+}
+
+/* The nearest button the way the arrow points (dx, dy: -1, 0 or 1), the same one if none. */
+static s32 Lb_Nav(s32 from, s32 dx, s32 dy) {
+    f32 ax0;
+    f32 ay0;
+    f32 ax1;
+    f32 ay1;
+    f32 cx;
+    f32 cy;
+    f32 best = 1.0e9f;
+    s32 pick = from;
+    s32 it;
+
+    Lb_Box(from, &ax0, &ay0, &ax1, &ay1);
+    cx = (ax0 + ax1) * 0.5f;
+    cy = (ay0 + ay1) * 0.5f;
+    for (it = 0; it < LBI_COUNT; it++) {
+        f32 x0;
+        f32 y0;
+        f32 x1;
+        f32 y1;
+        f32 ox;
+        f32 oy;
+        f32 along;
+        f32 aside;
+        f32 score;
+
+        if (it == from) {
+            continue;
+        }
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        ox = (x0 + x1) * 0.5f - cx;
+        oy = (y0 + y1) * 0.5f - cy;
+        along = dx != 0 ? ox * (f32)dx : oy * (f32)dy;
+        aside = dx != 0 ? oy : ox;
+        if (along < 4.0f) {
+            continue; /* (not that way) */
+        }
+        if (aside < 0.0f) {
+            aside = -aside;
+        }
+        score = along + aside * 2.5f;
+        if (score < best) {
+            best = score;
+            pick = it;
+        }
+    }
+    return pick;
+}
+
+/* The button START is: the owner's START (or the bracket), a member's READY. */
+static s32 Lb_StartAct(void) {
+    s32 k;
+
+    for (k = 0; k < 4; k++) {
+        s32 act = Tb_LobbyAct(k);
+
+        if (act == LB_ACT_START || act == LB_ACT_READY || act == LB_ACT_BRACKET) {
+            return act;
+        }
+    }
+    return 0;
+}
+
+static void Lb_RulesOpen(s32 row) {
+    sTb->lbRules = 1;
+    sTb->lbCol = 1;
+    sTb->lbRight = row;
+    Snd_PlaySe(1, 1);
+}
+
+static void Lb_Press(s32 it, s32 own) {
+    PortLobbyView *v = &sTbLv;
+    s32 i = Lb_Place(it);
+
+    if (i >= 0) {
+        if (sTb->lbPicked >= 0) {
+            if (i != sTb->lbPicked && own) {
+                Snd_PlaySe(1, 1);
+                Port_LobbyDo(LOBBY_MOVE, sTb->lbPicked, i);
+            } else {
+                Snd_PlaySe(1, 2);
+            }
+            sTb->lbPicked = -1;
+        } else if (own && v->taken[i]) {
+            Snd_PlaySe(1, 1);
+            sTb->lbPop = LB_POP_MEMBER;
+            sTb->lbPopT = 0;
+            sTb->lbPopClose = 0;
+            sTb->lbPopPlace = i;
+            sTb->lbPopCur = 0;
+        } else if (v->taken[i] && i != v->me) { /* (anyone: Add Friend on another player) */
+            Snd_PlaySe(1, 1);
+            sTb->lbPop = LB_POP_MEMBER;
+            sTb->lbPopT = 0;
+            sTb->lbPopClose = 0;
+            sTb->lbPopPlace = i;
+            sTb->lbPopCur = 0;
+        } else if (!v->taken[i]) {
+            Snd_PlaySe(1, 1);
+            PortFriends_Show(0);
+            Tb_Note("INVITE: PRESS INVITE NEXT TO AN ONLINE FRIEND (THE FRIENDS WINDOW)");
+        } else if (v->owner && v->phase) {
+            Snd_PlaySe(1, 2);
+            Tb_Note("NOT DURING A MATCH: THE PLACES CHANGE BETWEEN MATCHES");
+        } else {
+            Snd_PlaySe(1, 2);
+            Tb_Note("THE LEADER CHOOSES WHO PLAYS");
+        }
+        return;
+    }
+    switch (it) {
+    case LBI_COPY:
+        if (v->code[0] != 0) {
+            PortTbo_Copy(v->code);
+            Snd_PlaySe(1, 1);
+            Tb_Note("COPIED: PASTE THE CODE TO THE OTHERS");
+        } else if (v->owner && v->port > 0 && Tb_HostAddr(v->port)[0] != 0) {
+            PortTbo_Copy(Tb_HostAddr(v->port));
+            Snd_PlaySe(1, 1);
+            Tb_Note("COPIED: PASTE THE ADDRESS TO THE OTHERS");
+        } else {
+            Snd_PlaySe(1, 2);
+        }
+        break;
+    case LBI_LEAVE:
+        Tb_LobbyAction(LB_ACT_LEAVE);
+        break;
+    case LBI_MIC: { /* on, then push to talk (hold V), then off */
+        s32 m = PortVoice_Mode();
+
+        PortVoice_ModeSet(m == 1 ? 2 : m == 2 ? 0 : 1);
+        Snd_PlaySe(1, 0);
+        break;
+    }
+    case LBI_SPK:
+        PortVoice_SpeakerSet(!PortVoice_SpeakerOn());
+        Snd_PlaySe(1, 0);
+        break;
+    case LBI_INVITE:
+    case LBI_FRIENDS:
+        Snd_PlaySe(1, 1);
+        PortFriends_Show(0);
+        Tb_Note("FRIENDS: PRESS INVITE NEXT TO AN ONLINE FRIEND");
+        break;
+    case LBI_RANK:
+        Snd_PlaySe(1, 1);
+        PortFriends_Show(3);
+        Tb_Note("RANKING: THE LEADERBOARD OF RANKED MATCHES");
+        break;
+    case LBI_CHAT:
+        Tb_LobbyAction(LB_ACT_CHAT);
+        break;
+    case LBI_MAP:
+        Lb_RulesOpen(own ? 6 : LB_MINE);
+        if (!own) {
+            Tb_Note("THE LEADER PICKS THE MAP");
+        }
+        break;
+    case LBI_RULES:
+        Lb_RulesOpen(own ? 0 : LB_MINE);
+        break;
+    case LBI_FIGHTER:
+        Lb_RulesOpen(7);
+        break;
+    case LBI_START:
+        if (Lb_StartAct() == LB_ACT_START && !Tb_LobbyCanStart()) {
+            Snd_PlaySe(1, 2);
+            Tb_Note("WAITING FOR BOTH PLAYERS");
+        } else if (Lb_StartAct() != 0) {
+            Tb_LobbyAction(Lb_StartAct());
+        }
+        break;
+    }
+}
+
+/* The page's own input (no window over it). */
+static void Lb_Update(s32 live, s32 own) {
+    Pad *pad = &gPad[0];
+    PortLobbyView *v = &sTbLv;
+    s32 ev = Port_MenuPointerPoll();
+    s32 hit = Lb_Hit();
+    s32 f = sTb->lbFocus;
+
+    if (sTb->lbPicked >= 0) {
+        Ps_Prompt(0, "Move Here");
+        Ps_Prompt(2, "Cancel");
+    }
+    if (!live) {
+        return;
+    }
+    if (f < 0 || f >= LBI_COUNT) {
+        f = LBI_START;
+    }
+    if ((ev & 1) && hit >= 0 && hit != f) { /* pointing selects */
+        f = hit;
+        Snd_PlaySe(1, 0);
+    }
+    if (pad->gameRepeat & (PADG_UP | PADG_UP2)) {
+        f = Lb_Nav(f, 0, -1);
+        Snd_PlaySe(1, 0);
+    } else if (pad->gameRepeat & (PADG_DOWN | PADG_DOWN2)) {
+        f = Lb_Nav(f, 0, 1);
+        Snd_PlaySe(1, 0);
+    } else if (pad->gameRepeat & (PADG_LEFT | PADG_LEFT2)) {
+        f = Lb_Nav(f, -1, 0);
+        Snd_PlaySe(1, 0);
+    } else if (pad->gameRepeat & (PADG_RIGHT | PADG_RIGHT2)) {
+        f = Lb_Nav(f, 1, 0);
+        Snd_PlaySe(1, 0);
+    }
+    sTb->lbFocus = f;
+    if ((ev & 2) && hit >= 0) { /* a click presses */
+        sTb->lbFocus = hit;
+        Lb_Press(hit, own);
+    } else if (pad->gamePressed & PADG_CROSS) {
+        Lb_Press(f, own);
+    } else if ((pad->gamePressed & PADG_SQUARE) && sTb->lbPicked < 0) {
+        Lb_Press(LBI_COPY, own);
+    } else if ((pad->gamePressed & PADG_START) && v->owner && sTb->lbPicked < 0) {
+        Tb_LobbyStart();
+    } else if ((pad->gamePressed & PADG_TRIANGLE) || (ev & 4)) {
+        if (sTb->lbPicked >= 0) {
+            Snd_PlaySe(1, 2);
+            sTb->lbPicked = -1;
+        } else if (pad->gamePressed & PADG_TRIANGLE) {
+            Tb_LobbyAction(LB_ACT_LEAVE);
+        }
+    }
+}
+
+/* An ellipse (the platforms the players stand on). */
+static void Lb_Ellipse(f32 cx, f32 cy, f32 rx, f32 ry, u32 mid, u32 edge) {
+    s32 k;
+
+    for (k = 0; k < 32; k++) {
+        f32 a0 = (f32)k * 6.2831853f / 32.0f;
+        f32 a1 = (f32)(k + 1) * 6.2831853f / 32.0f;
+
+        Ps_Quad(cx, cy, cx, cy, cx + cosf(a0) * rx, cy + sinf(a0) * ry, cx + cosf(a1) * rx, cy + sinf(a1) * ry, mid, mid, edge, edge);
+    }
+}
+
+/* The cursor's mark behind a button. */
+static void Lb_Focus(s32 it) {
+    f32 x0;
+    f32 y0;
+    f32 x1;
+    f32 y1;
+
+    if (sTb->lbFocus != it || sTb->lbRules || sTb->lbPop != 0 || sTb->lbChat) {
+        return;
+    }
+    Lb_Box(it, &x0, &y0, &x1, &y1);
+    if (it >= LBI_MIC && it <= LBI_RANK) {
+        Ps_Disc((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (y1 - y0) * 0.5f + 3.5f, Ps_Rgba(0xFF, 0xD2, 0x3C, 0x80), Ps_Rgba(0xFF, 0xB0, 0x20, 0x80));
+    } else {
+        Ps_Pill(TBO_KIT_SEL, x0 - 3.0f, y0 - 3.0f, x1 + 3.0f, y1 + 3.0f, 0x80);
+    }
+}
+
+/* The players standing: in 3D when the models are in (src/menu/port_modmgr.c), their pictures until then. */
+static void Lb_Squad(void) {
+    PortLobbyView *v = &sTbLv;
+    s32 want[2];
+    s32 k;
+    s32 on = Port_Setting("lobby_3d", 1) != 0 && v->state == 2 && !Port_NetSession() && sTb->mode == TB_LOBBY && !sTb->leaving;
+
+    sLb3d[0] = 0;
+    sLb3d[1] = 0;
+    for (k = 0; k < 2; k++) { /* the platforms */
+        f32 cx = Lb_X(k == 0 ? LB_SQUAD_X1 : 1280.0f - LB_SQUAD_X1);
+
+        Lb_Ellipse(cx, Lb_Y(LB_SQUAD_FEET), Lb_X(640.0f + 118.0f) - Lb_X(640.0f), Lb_Y(26.0f), Ps_Rgba(0x60, 0xC8, 0xFF, 0x30), Ps_Rgba(0xA0, 0xF0, 0xFF, 0x60));
+    }
+    if (on && !Mm_PairIsOpen()) {
+        Mm_PairOpen();
+    } else if (!on && Mm_PairIsOpen()) {
+        Mm_PairClose();
+    }
+    if (on) {
+        for (k = 0; k < 2; k++) {
+            want[k] = v->taken[k] && v->fighter[k] > 0 ? (v->fighter[k] - 1) * 4 : -1;
+        }
+        Mm_PairUpdate(want[0], want[1], 1);
+        Mm_PairDrawFrac(Ps_X(Lb_X(LB_SQUAD_X1)) / 512.0f, Ps_Y(Lb_Y(LB_SQUAD_FEET)) / 448.0f,
+                        (Ps_Y(Lb_Y(LB_SQUAD_FEET)) - Ps_Y(Lb_Y(LB_SQUAD_FEET - LB_SQUAD_H))) / 448.0f, &sLb3d[0], &sLb3d[1]);
+    }
+    for (k = 0; k < 2; k++) { /* (their pictures meanwhile, as the character select's) */
+        if (!sLb3d[k] && v->taken[k] && v->fighter[k] > 0) {
+            f32 cx = Lb_X(k == 0 ? LB_SQUAD_X1 : 1280.0f - LB_SQUAD_X1);
+            f32 h = Lb_Y(LB_SQUAD_H);
+            f32 w = h * 0.5f * 0.857f;
+            f32 feet = Lb_Y(LB_SQUAD_FEET + 6.0f);
+
+            Ps_Sprite(TBO_FIGHTER_BASE + v->fighter[k] - 1, cx - w * 0.5f, feet - h, cx + w * 0.5f, feet, k == 0 ? 0.0f : 1.0f, 0.0f, k == 0 ? 1.0f : 0.0f, 1.0f, PS_PLAIN, 0x80);
+        }
+    }
+}
+
+/* The page's pictures and panels (Tb_DrawLobby). */
+static void Lb_Draw(void) {
+    PortLobbyView *v = &sTbLv;
+    f32 x0;
+    f32 y0;
+    f32 x1;
+    f32 y1;
+    s32 it;
+
+    Lb_Squad();
+    /* the top: the code, COPY, LEAVE */
+    Ps_Panel(TBO_KIT_WINDOW, Lb_X(20.0f), Lb_Y(16.0f), Lb_X(330.0f), Lb_Y(70.0f), 0x80);
+    Lb_Focus(LBI_COPY);
+    Lb_Box(LBI_COPY, &x0, &y0, &x1, &y1);
+    Ps_Pill(TBO_KIT_BAR, x0, y0, x1, y1, 0x80);
+    Lb_Focus(LBI_LEAVE);
+    Lb_Box(LBI_LEAVE, &x0, &y0, &x1, &y1);
+    Ps_Pill(TBO_KIT_STEEL, x0, y0, x1, y1, 0x80);
+    /* who watches */
+    Ps_Panel(TBO_KIT_WINDOW, Lb_X(20.0f), Lb_Y(96.0f), Lb_X(170.0f), Lb_Y(440.0f), 0x80);
+    for (it = LBI_W0; it < LBI_W0 + 6; it++) {
+        s32 i = Lb_Place(it);
+
+        Lb_Focus(it);
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        if (v->taken[i] && v->talking[i]) {
+            Ps_Pill(TBO_KIT_GOLD, x0, y0, x1, y1, 0x80);
+        } else {
+            Ps_Pill(TBO_KIT_BAR, x0, y0, x1, y1, v->taken[i] ? 0x80 : 0x40);
+        }
+        if (v->taken[i] && v->fighter[i] > 0) {
+            f32 s = (y1 - y0) - 6.0f;
+
+            Ps_Sprite(TBO_FACE_BASE + v->fighter[i] - 1, x0 + 4.0f, y0 + 3.0f, x0 + 4.0f + s * 0.857f, y0 + 3.0f + s, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+        }
+    }
+    /* the players' name plates (the gold ring while one talks) */
+    for (it = LBI_P1; it <= LBI_P2; it++) {
+        s32 i = Lb_Place(it);
+
+        Lb_Focus(it);
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        if (v->taken[i] && v->talking[i]) {
+            Ps_Pill(TBO_KIT_GOLD, x0 - 2.0f, y0 - 2.0f, x1 + 2.0f, y1 + 2.0f, 0x80);
+        }
+        Ps_Panel(TBO_KIT_WINDOW, x0, y0, x1, y1, 0x80);
+        if (i == sTb->lbPicked) {
+            Ps_Pill(TBO_KIT_GOLD, x0 + 4.0f, y0 + 4.0f, x1 - 4.0f, y1 - 4.0f, 0x60);
+        }
+    }
+    /* the round buttons */
+    for (it = LBI_MIC; it <= LBI_RANK; it++) {
+        u32 mid = Ps_Rgba(0x18, 0x9C, 0x5C, 0x78);
+        u32 edge = Ps_Rgba(0x10, 0x70, 0x40, 0x78);
+
+        if ((it == LBI_MIC && PortVoice_Mode() == 0) || (it == LBI_SPK && !PortVoice_SpeakerOn())) {
+            mid = Ps_Rgba(0x9C, 0x28, 0x28, 0x78);
+            edge = Ps_Rgba(0x60, 0x14, 0x14, 0x78);
+        } else if (it == LBI_RANK) {
+            mid = Ps_Rgba(0x28, 0x5C, 0xB4, 0x78);
+            edge = Ps_Rgba(0x14, 0x34, 0x78, 0x78);
+        }
+        Lb_Focus(it);
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        Ps_Disc((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (y1 - y0) * 0.5f + 1.0f, Ps_Rgba(0xFF, 0xFF, 0xFF, 0x70), Ps_Rgba(0xFF, 0xFF, 0xFF, 0x70));
+        Ps_Disc((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (y1 - y0) * 0.5f - 1.0f, mid, edge);
+    }
+    /* the chat, the right side */
+    for (it = LBI_CHAT; it <= LBI_START; it++) {
+        Lb_Focus(it);
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        if (it == LBI_START) {
+            Ps_Pill(TBO_KIT_GOLD, x0, y0, x1, y1, Lb_StartAct() == LB_ACT_START && !Tb_LobbyCanStart() ? 0x58 : 0x80);
+        } else if (it == LBI_FIGHTER) {
+            Ps_Pill(TBO_KIT_BAR, x0, y0, x1, y1, 0x80);
+        } else {
+            Ps_Panel(TBO_KIT_WINDOW, x0, y0, x1, y1, 0x80);
+        }
+    }
+    if (v->stage >= 0) { /* the map's picture */
+        Ps_Sprite(TBO_STAGE_BASE + v->stage, Lb_X(992.0f), Lb_Y(102.0f), Lb_X(1248.0f), Lb_Y(246.0f), 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+    }
+}
+
+/* One line of what happened (a note, or "Name: chat"), for the chat panel. */
+static void Lb_LogLine(char *out, s32 e) {
+    PortLobbyView *v = &sTbLv;
+    s32 t;
+    s32 k;
+
+    if (v->logName[e][0] != 0) {
+        Ps_Copy(out, v->logName[e], 120);
+        Ps_Cat(out, ": ", 120);
+        t = Ps_Len(out);
+        for (k = 0; v->logText[e][k] != 0 && t < 118; k++) {
+            out[t++] = v->logText[e][k];
+        }
+        out[t] = 0;
+    } else {
+        Tb_LobbyLine(out, 120, v->logText[e]);
+    }
+}
+
+/* The page's words (Tb_DrawLobbyText). */
+static void Lb_DrawText(void) {
+    static char line[128];
+    static char line2[64];
+    PortLobbyView *v = &sTbLv;
+    f32 x0;
+    f32 y0;
+    f32 x1;
+    f32 y1;
+    s32 it;
+    s32 i;
+    s32 watch = 0;
+
+    /* the code */
+    Ps_Text(Lb_X(36.0f), Ps_TextTop(Lb_Y(32.0f), 0.42f), "KAME HOUSE ARENA", 0.42f, 0.0f, 1);
+    if (v->code[0] != 0) {
+        Ps_Copy(line, "LOBBY  ", 128);
+        Ps_Cat(line, v->code, 128);
+    } else if (v->owner && v->port > 0) {
+        sprintf(line, "PORT  %d", (int)v->port);
+    } else {
+        Ps_Copy(line, "LOBBY", 128);
+    }
+    Ps_Text(Lb_X(36.0f), Ps_TextTop(Lb_Y(55.0f), 0.62f), line, 0.62f, Lb_X(320.0f) - Lb_X(36.0f), 0);
+    Ps_Align(1);
+    Lb_Box(LBI_COPY, &x0, &y0, &x1, &y1);
+    Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.46f), "COPY", 0.46f, x1 - x0 - 4.0f, sTb->lbFocus == LBI_COPY ? 1 : 0);
+    Lb_Box(LBI_LEAVE, &x0, &y0, &x1, &y1);
+    Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.5f), v->owner ? "CLOSE" : "LEAVE", 0.5f, x1 - x0 - 4.0f, sTb->lbFocus == LBI_LEAVE ? 1 : 0);
+    Ps_Align(0);
+    /* who watches */
+    for (i = 2; i < LB_ROWS; i++) {
+        watch += v->taken[i];
+    }
+    sprintf(line, v->entrants > 2 ? "PLACES 3-8" : "WATCHING %d/6", (int)watch);
+    Ps_Align(1);
+    Ps_Text(Lb_X(95.0f), Ps_TextTop(Lb_Y(117.0f), 0.42f), line, 0.42f, Lb_X(165.0f) - Lb_X(25.0f), 3);
+    Ps_Align(0);
+    for (it = LBI_W0; it < LBI_W0 + 6; it++) {
+        i = Lb_Place(it);
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        if (v->taken[i]) {
+            f32 nx = x0 + (v->fighter[i] > 0 ? (y1 - y0) * 0.857f + 4.0f : 6.0f);
+
+            Ps_Text(nx, Ps_TextTop((y0 + y1) * 0.5f, 0.46f), v->name[i], 0.46f, x1 - nx - 3.0f, sTb->lbFocus == it ? 1 : i == v->me ? 3 : 0);
+        } else {
+            Ps_Align(1);
+            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.42f), i == sTb->lbPicked ? "" : "+ invite", 0.42f, 0.0f, sTb->lbFocus == it ? 1 : 4);
+            Ps_Align(0);
+        }
+    }
+    /* the players: name, the leader's crown, ready */
+    for (it = LBI_P1; it <= LBI_P2; it++) {
+        i = Lb_Place(it);
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        Ps_Align(1);
+        if (v->taken[i]) {
+            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.36f, 0.62f), v->name[i], 0.62f, x1 - x0 - 10.0f, sTb->lbFocus == it ? 1 : 0);
+            line2[0] = 0;
+            if (v->isOwner[i]) {
+                Ps_Copy(line2, "LEADER", 64); /* (the crown: the lobby's owner, BGMI's leader) */
+            }
+            if (i == v->me) {
+                Ps_Cat(line2, line2[0] != 0 ? "  YOU" : "YOU", 64);
+            }
+            if (v->ready[i] && !v->mode) {
+                Ps_Cat(line2, line2[0] != 0 ? "  READY" : "READY", 64);
+            }
+            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.76f, 0.38f), line2, 0.38f, x1 - x0 - 10.0f, v->ready[i] ? 5 : 1);
+            if (v->isOwner[i]) { /* a crown over the plate */
+                f32 cx = (x0 + x1) * 0.5f;
+                f32 cy = y0 - 5.0f;
+                u32 g = Ps_Rgba(0xFF, 0xD2, 0x3C, 0x80);
+
+                Ps_Quad(cx - 9.0f, cy + 3.0f, cx + 9.0f, cy + 3.0f, cx - 9.0f, cy - 4.0f, cx + 9.0f, cy - 4.0f, g, g, g, g);
+                Ps_Quad(cx - 9.0f, cy - 4.0f, cx - 6.0f, cy - 4.0f, cx - 9.0f, cy - 10.0f, cx - 9.0f, cy - 10.0f, g, g, g, g);
+                Ps_Quad(cx - 2.5f, cy - 4.0f, cx + 2.5f, cy - 4.0f, cx, cy - 12.0f, cx, cy - 12.0f, g, g, g, g);
+                Ps_Quad(cx + 6.0f, cy - 4.0f, cx + 9.0f, cy - 4.0f, cx + 9.0f, cy - 10.0f, cx + 9.0f, cy - 10.0f, g, g, g, g);
+            }
+            if (v->talking[i]) {
+                Ps_Align(0);
+                Ps_Text(x1 + 6.0f, Ps_TextTop((y0 + y1) * 0.5f, 0.36f), "speaking", 0.36f, 0.0f, 1);
+                Ps_Align(1);
+            }
+        } else {
+            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.56f), "+ INVITE", 0.56f, 0.0f, sTb->lbFocus == it ? 1 : 4);
+        }
+        Ps_Align(0);
+    }
+    if (v->taken[0] && v->taken[1]) {
+        Ps_Align(1);
+        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(330.0f), 1.6f), "VS", 1.6f, 0.0f, 1);
+        Ps_Align(0);
+    }
+    if (v->phase || v->tour != 0) {
+        Ps_Align(1);
+        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(80.0f), 0.5f), v->phase ? "A MATCH IS ON" : v->tour == 1 ? "TOURNAMENT ON" : "TOURNAMENT OVER", 0.5f, 0.0f, 5);
+        Ps_Align(0);
+    }
+    /* the round buttons' letters and names */
+    for (it = LBI_MIC; it <= LBI_RANK; it++) {
+        static char *const kIcon[4] = {"M", "S", "+", "R"};
+        char *name = "INVITE";
+
+        if (it == LBI_MIC) {
+            name = PortVoice_Mode() == 1 ? "MIC: ON" : PortVoice_Mode() == 2 ? "MIC: HOLD V" : "MIC: OFF";
+        } else if (it == LBI_SPK) {
+            name = PortVoice_SpeakerOn() ? "SPEAKER" : "SPEAKER OFF";
+        } else if (it == LBI_RANK) {
+            name = "RANKING";
+        }
+        Lb_Box(it, &x0, &y0, &x1, &y1);
+        Ps_Align(1);
+        Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.9f), kIcon[it - LBI_MIC], 0.9f, 0.0f, 0);
+        Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y1 + 9.0f, 0.36f), name, 0.36f, x1 - x0 + 14.0f, sTb->lbFocus == it ? 1 : 0);
+        Ps_Align(0);
+    }
+    /* the chat: the last three things that happened */
+    Lb_Box(LBI_CHAT, &x0, &y0, &x1, &y1);
+    for (i = 0; i < 3; i++) {
+        s32 e = v->logCount - 3 + i;
+
+        if (e >= 0) {
+            Lb_LogLine(line, e);
+            Ps_Text(x0 + 8.0f, Ps_TextTop(y0 + 13.0f + 16.0f * (f32)i, 0.42f), line, 0.42f, x1 - x0 - 16.0f, 0);
+        }
+    }
+    Ps_Align(2);
+    Ps_Text(x1 - 6.0f, Ps_TextTop(y1 - 7.0f, 0.32f), "CHAT", 0.32f, 0.0f, sTb->lbFocus == LBI_CHAT ? 1 : 3);
+    Ps_Align(0);
+    /* the map card */
+    Lb_Box(LBI_MAP, &x0, &y0, &x1, &y1);
+    if (v->stage >= 0) {
+        extern const char *Port_StageNameEn(int stage); /* gs/fight_panels_ui.cpp */
+        const char *nm = Port_StageNameEn(v->stage);
+
+        if (nm != NULL) { /* (not `?:` between a name and a literal: the 32-bit pointers) */
+            Ps_Copy(line, (char *)nm, 128);
+        } else {
+            Ps_Copy(line, "STAGE", 128);
+        }
+    } else {
+        Ps_Copy(line, "PLAYERS CHOOSE THE MAP", 128);
+    }
+    Ps_Text(Lb_X(992.0f), Ps_TextTop(Lb_Y(265.0f), 0.56f), line, 0.56f, x1 - Lb_X(992.0f) - 6.0f, sTb->lbFocus == LBI_MAP ? 1 : 0);
+    Ps_Text(Lb_X(992.0f), Ps_TextTop(Lb_Y(286.0f), 0.34f), v->owner ? "MAP: CLICK OR PRESS TO CHANGE" : "MAP: THE LEADER PICKS", 0.34f, x1 - Lb_X(992.0f) - 6.0f, 3);
+    /* the rules */
+    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(330.0f), 0.42f), "RULES", 0.42f, 0.0f, sTb->lbFocus == LBI_RULES ? 1 : 2);
+    Tb_RuleValue(line, 1);
+    Tb_RuleValue(line2, 2);
+    Ps_Cat(line, "   ", 128);
+    Ps_Cat(line, line2, 128);
+    Tb_RuleValue(line2, 3);
+    Ps_Cat(line, "   SPEED ", 128);
+    Ps_Cat(line, line2, 128);
+    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(356.0f), 0.38f), line, 0.38f, Lb_X(1250.0f) - Lb_X(995.0f), 0);
+    Tb_RuleValue(line, 4);
+    Tb_RuleValue(line2, 5);
+    Ps_Cat(line, "   ", 128);
+    Ps_Cat(line, line2, 128);
+    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(380.0f), 0.38f), line, 0.38f, Lb_X(1250.0f) - Lb_X(995.0f), 0);
+    /* CHANGE FIGHTER */
+    Lb_Box(LBI_FIGHTER, &x0, &y0, &x1, &y1);
+    Ps_Align(1);
+    Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.6f), "CHANGE FIGHTER", 0.6f, x1 - x0 - 10.0f, sTb->lbFocus == LBI_FIGHTER ? 1 : 0);
+    Ps_Align(0);
+    /* the online friends (twice a second from the friends service) */
+    if ((sTb->frames % 30) == 0) {
+        PortFriends_View(&sLbFriends);
+    }
+    Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(500.0f), 0.42f), "ONLINE FRIENDS", 0.42f, 0.0f, sTb->lbFocus == LBI_FRIENDS ? 1 : 2);
+    {
+        s32 shown = 0;
+        s32 k;
+
+        for (k = 0; k < sLbFriends.friendCount && shown < 2; k++) {
+            PortFriend *fr = &sLbFriends.friends[k];
+
+            if (!fr->online) {
+                continue;
+            }
+            Ps_Copy(line, fr->name, 128);
+            Ps_Cat(line, "   ", 128);
+            if (fr->state[0] != 0) { /* (not `?:` between the friend's word and a literal: the 32-bit pointers) */
+                Ps_Cat(line, fr->state, 128);
+            } else {
+                Ps_Cat(line, "online", 128);
+            }
+            Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(526.0f + 24.0f * (f32)shown), 0.38f), line, 0.38f, Lb_X(1180.0f) - Lb_X(995.0f), 5);
+            Ps_Align(2);
+            Ps_Text(Lb_X(1250.0f), Ps_TextTop(Lb_Y(526.0f + 24.0f * (f32)shown), 0.34f), "INVITE", 0.34f, 0.0f, 1);
+            Ps_Align(0);
+            shown++;
+        }
+        if (shown == 0) {
+            Ps_Text(Lb_X(995.0f), Ps_TextTop(Lb_Y(530.0f), 0.36f), sLbFriends.known ? "NO FRIEND ONLINE: PRESS TO ADD" : "PRESS TO OPEN FRIENDS", 0.36f,
+                    Lb_X(1250.0f) - Lb_X(995.0f), 4);
+        }
+    }
+    /* START */
+    Lb_Box(LBI_START, &x0, &y0, &x1, &y1);
+    Ps_Align(1);
+    {
+        s32 act = Lb_StartAct();
+        char *big = "START";
+        char *small = "both players ready";
+
+        if (act == LB_ACT_READY) {
+            big = "READY";
+            small = "tell the leader you are set";
+        } else if (act == LB_ACT_BRACKET) {
+            big = "BRACKET";
+            small = "the tournament's matches";
+        } else if (act == LB_ACT_START && !Tb_LobbyCanStart()) {
+            small = "waiting for both players";
+        } else if (act == 0) {
+            big = "WAIT";
+            small = "the leader starts the match";
+        }
+        Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.4f, 1.5f), big, 1.5f, x1 - x0 - 12.0f, Ps_Rgba(0x5C, 0x2C, 0x00, 0x80),
+                  Ps_Rgba(0x3C, 0x1C, 0x00, 0x80), Ps_Rgba(0xFF, 0xE8, 0x90, 0x80));
+        Ps_TextEx((x0 + x1) * 0.5f, Ps_TextTop(y0 + (y1 - y0) * 0.8f, 0.4f), small, 0.4f, x1 - x0 - 12.0f, Ps_Rgba(0x5C, 0x30, 0x00, 0x80),
+                  Ps_Rgba(0x5C, 0x30, 0x00, 0x80), Ps_Rgba(0xFF, 0xE8, 0x90, 0x00));
+    }
+    Ps_Align(0);
+}
+
+/* The rules window's rows under the mouse (the page's old right side): a rule 0..8, a button LB_BTN + k, -1 none;
+   *outside 1 when the pointer is off the window. */
+static f32 Tb_LobbyRuleY(s32 i);
+static void Tb_LobbyBtnBox(s32 k, f32 *x0, f32 *y0, f32 *x1, f32 *y1);
+static s32 Lb_RulesHit(s32 *outside) {
+    s32 px = Port_MenuPointerX();
+    s32 py = Port_MenuPointerY();
+    f32 ax = Ps_X(0.0f);
+    f32 bx = Ps_X(512.0f);
+    f32 ay = Ps_Y(0.0f);
+    f32 by = Ps_Y(448.0f);
+    f32 x;
+    f32 y;
+    s32 i;
+    s32 k;
+
+    *outside = 0;
+    if (px < 0 || bx - ax < 1.0f || by - ay < 1.0f) {
+        return -1;
+    }
+    x = ((f32)px - ax) * 512.0f / (bx - ax);
+    y = ((f32)py - ay) * 448.0f / (by - ay);
+    *outside = x < 252.0f || x > 508.0f || y < 96.0f || y > 322.0f;
+    for (i = 0; i < LB_RULES; i++) {
+        f32 ry = Tb_LobbyRuleY(i);
+
+        if (x >= 264.0f && x <= 496.0f && y >= ry - 1.0f && y <= ry + 14.0f) {
+            return i;
+        }
+    }
+    for (k = 0; k < 4; k++) {
+        f32 x0;
+        f32 y0;
+        f32 x1;
+        f32 y1;
+
+        if (Tb_LobbyAct(k) == 0) {
+            continue;
+        }
+        Tb_LobbyBtnBox(k, &x0, &y0, &x1, &y1);
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+            return LB_BTN + k;
+        }
+    }
+    return -1;
+}
+
 static s32 Tb_LobbyPopCount(void) {
-    return sTb->lbPop == LB_POP_MEMBER ? (sTbLv.isOwner[sTb->lbPopPlace] ? 2 : 3) : 2;
+    if (sTb->lbPop != LB_POP_MEMBER) {
+        return 2;
+    }
+    if (!sTbLv.owner) {
+        return 2; /* Add Friend, Back */
+    }
+    return sTbLv.isOwner[sTb->lbPopPlace] || sTb->lbPopPlace == sTbLv.me ? 2 : 4; /* (the leader: Move, Remove, Add Friend, Back) */
 }
 
 static char *Tb_LobbyPopItem(s32 i) {
     if (sTb->lbPop == LB_POP_LEAVE || sTb->lbPop == LB_POP_CALLOFF) {
         return i == 0 ? "Yes" : "No";
     }
-    if (i == 0) {
-        return "Move";
+    if (!sTbLv.owner) {
+        return i == 0 ? "Add Friend" : "Back";
     }
-    return i == 1 && !sTbLv.isOwner[sTb->lbPopPlace] ? "Remove from the Lobby" : "Back";
+    if (sTbLv.isOwner[sTb->lbPopPlace] || sTb->lbPopPlace == sTbLv.me) {
+        return i == 0 ? "Move" : "Back";
+    }
+    return i == 0 ? "Move" : i == 1 ? "Remove from the Lobby" : i == 2 ? "Add Friend" : "Back";
 }
 
 #define TB_POP_IN 10  /* frames a window over the lobby's page takes to come in */
@@ -2502,9 +3307,38 @@ static void Tb_LobbyPopUpdate(void) {
         sTb->lbCol = 0;
     } else if (strcmp(item, "Back") == 0) {
         Snd_PlaySe(1, 2);
+    } else if (strcmp(item, "Add Friend") == 0) { /* (this modded copy) by the code the friends service met them under */
+        s32 k;
+        s32 found = -1;
+        s32 already = 0;
+
+        PortFriends_View(&sLbFriends);
+        for (k = 0; k < sLbFriends.friendCount; k++) {
+            if (strcmp(sLbFriends.friends[k].name, sTbLv.name[sTb->lbPopPlace]) == 0) {
+                already = 1;
+            }
+        }
+        for (k = 0; k < sLbFriends.recentCount && found < 0; k++) {
+            if (strcmp(sLbFriends.recent[k].name, sTbLv.name[sTb->lbPopPlace]) == 0) {
+                found = k;
+            }
+        }
+        if (already) {
+            Snd_PlaySe(1, 2);
+            Tb_Note("ALREADY FRIENDS");
+        } else if (found >= 0) {
+            Snd_PlaySe(1, 1);
+            PortFriends_Add(sLbFriends.recent[found].code);
+            Tb_Note("FRIEND REQUEST SENT");
+        } else {
+            Snd_PlaySe(1, 2);
+            PortFriends_Refresh();
+            Tb_Note("NOT KNOWN TO THE FRIENDS SERVICE YET: TRY AGAIN IN A MOMENT");
+        }
     } else {
         Snd_PlaySe(1, 1);
         Port_LobbyDo(LOBBY_KICK, sTb->lbPopPlace, 0);
+        Tb_Note("REMOVED FROM THE LOBBY");
     }
     sTb->lbPopClose = TB_POP_OUT; /* (it slides out first) */
 }
@@ -2623,6 +3457,33 @@ static void Tb_LobbyUpdate(s32 live) {
         }
         return;
     }
+    if (!sTb->lbRules) { /* (this modded copy) the page as the mockup: its own buttons, the controller and the mouse */
+        Lb_Update(live, own);
+        return;
+    }
+    if (live) { /* the rules window: circle, a right click or a click off it close it; pointing picks a row */
+        s32 ev = Port_MenuPointerPoll();
+        s32 outside;
+        s32 hit = Lb_RulesHit(&outside);
+
+        if ((pad->gamePressed & PADG_CIRCLE) || (ev & 4) || ((ev & 2) && outside)) {
+            Snd_PlaySe(1, 2);
+            sTb->lbRules = 0;
+            return;
+        }
+        if (hit >= 0 && (own || hit >= LB_MINE || hit >= LB_BTN) && (ev & 3)) {
+            sTb->lbRight = hit;
+            if (ev & 2) {
+                if (hit < LB_BTN) {
+                    pad->gameRepeat |= PADG_RIGHT; /* (a click on a rule: its next value) */
+                } else {
+                    pad->gamePressed |= PADG_CROSS;
+                }
+            }
+        }
+    }
+    sTb->lbCol = 1;
+    pad->gamePressed &= ~(PADG_L1 | PADG_R1);
     if (sTb->lbPicked >= 0) {
         Ps_Prompt(0, "Move Here");
         Ps_Prompt(2, "Cancel");
@@ -2639,7 +3500,7 @@ static void Tb_LobbyUpdate(s32 live) {
         if (Tb_LobbyCanStart() && !(sTb->lbCol == 1 && sTb->lbRight < LB_BTN)) {
             Ps_Prompt(7, Tb_LobbyActName(LB_ACT_START));
         }
-        Ps_Prompt(2, v->owner ? "Close Lobby" : "Leave Lobby");
+        Ps_Prompt(2, "Back");
     }
     if (!live) {
         return;
@@ -2773,8 +3634,9 @@ static void Tb_LobbyUpdate(s32 live) {
         if (sTb->lbPicked >= 0) {
             Snd_PlaySe(1, 2);
             sTb->lbPicked = -1;
-        } else {
-            Tb_LobbyAction(LB_ACT_LEAVE);
+        } else { /* (this modded copy: the rules window closes; LEAVE is the page's) */
+            Snd_PlaySe(1, 2);
+            sTb->lbRules = 0;
         }
     }
 }
@@ -2829,8 +3691,19 @@ static void Tb_DrawLobby(void) {
         Tb_LobbyHostsOut();
         return;
     }
-    Ps_Panel(TBO_KIT_WINDOW, LB_L0, 52.0f, LB_L1, 316.0f, 0x80);
-    for (i = 0; i < LB_ROWS; i++) {
+    Lb_Draw(); /* (this modded copy) the page as the mockup */
+    if (!sTb->lbRules) {
+        Tb_LobbyHostsOut();
+        return;
+    }
+    { /* the rules window over it: the page dimmed */
+        f32 l = Ps_Left();
+        u32 dim = Ps_Rgba(0, 0, 0, 0x48);
+
+        Ps_Quad(l, 0.0f, 512.0f - l, 0.0f, l, 448.0f, 512.0f - l, 448.0f, dim, dim, dim, dim);
+    }
+    Ps_Panel(TBO_KIT_WINDOW, LB_R0 - 6.0f, 96.0f, LB_R1 + 6.0f, 322.0f, 0x80);
+    for (i = 0; i < 0; i++) { /* (the old places' list: the page's own now) */
         f32 y = Tb_LobbyRowY(i);
         s32 on = sTb->lbCol == 0 && i == sTb->lbPlace && !sTb->lbChat;
 
@@ -2851,12 +3724,6 @@ static void Tb_DrawLobby(void) {
             Ps_Sprite(TBO_FACE_BASE + v->fighter[i] - 1, 54.0f, y + 1.0f, 74.0f, y + 21.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
         }
     }
-    Ps_Panel(TBO_KIT_WINDOW, LB_R0, 52.0f, LB_R1, 98.0f, 0x80);
-    if (v->stage >= 0) { /* (this modded copy) the map card: the lobby's stage */
-        Ps_Pill(TBO_KIT_STEEL, 429.0f, 54.0f, 499.0f, 96.0f, 0x80);
-        Ps_Sprite(TBO_STAGE_BASE + v->stage, 432.0f, 56.0f, 496.0f, 92.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
-    }
-    Ps_Panel(TBO_KIT_WINDOW, LB_R0, 101.0f, LB_R1, 255.0f, 0x80);
     for (i = 0; i < LB_RULES; i++) {
         f32 y = Tb_LobbyRuleY(i);
         s32 on = sTb->lbCol == 1 && sTb->lbRight == i && !sTb->lbChat;
@@ -2901,9 +3768,14 @@ static void Tb_DrawLobbyText(void) {
     if (v->state != 2) {
         return; /* (Tb_DrawLobbyWin) */
     }
+    Lb_DrawText(); /* (this modded copy) the page as the mockup; the rest below is the rules window's */
+    if (!sTb->lbRules) {
+        return;
+    }
     for (i = v->entrants; i < LB_ROWS; i++) {
         watch += v->taken[i];
     }
+    if (watch < 0) { /* (the old page's words, kept out of sight: the places, the code) */
     if (v->mode) {
         sprintf(line, Tb_Fmt("PLAYERS  %d / %d"), (int)v->entrantCount, (int)v->entrants);
         Ps_Text(26.0f, Ps_TextTop(64.0f, 0.5f), line, 0.5f, 210.0f, 2);
@@ -2989,8 +3861,9 @@ static void Tb_DrawLobbyText(void) {
         Ps_Text(391.0f, Ps_TextTop(392.0f, 1.1f), "VS", 1.1f, 0.0f, 1);
         Ps_Align(0);
     }
+    }
     /* the rules */
-    Ps_Text(270.0f, Ps_TextTop(108.0f, 0.46f), v->owner ? "RULES" : "RULES (THE OWNER'S)", 0.46f, 220.0f, 2);
+    Ps_Text(270.0f, Ps_TextTop(108.0f, 0.46f), v->owner ? "RULES  (THE LEADER SETS THEM)" : "RULES  (THE LEADER'S)", 0.46f, 220.0f, 2);
     for (i = 0; i < LB_RULES; i++) {
         f32 mid = Tb_LobbyRuleY(i) + 6.5f;
         s32 on = sTb->lbCol == 1 && sTb->lbRight == i && !sTb->lbChat;
@@ -4096,8 +4969,11 @@ static void Tb_Draw(void) {
         break;
     }
     Tb_PageIn(0);
-    Ps_Panel(TBO_KIT_WINDOW, 300.0f, 10.0f, 504.0f, 44.0f, 0x80); /* the player card: the name alone */
-    {   /* the game's box with the hosts' line (the buttons under it: Tb_DrawText); in a lobby what happened last */
+    if (!(sTb->mode == TB_LOBBY && sTbLv.state == 2)) { /* (this modded copy: the lobby's page has its own top) */
+        Ps_Panel(TBO_KIT_WINDOW, 300.0f, 10.0f, 504.0f, 44.0f, 0x80); /* the player card: the name alone */
+    }
+    if (!(sTb->mode == TB_LOBBY && sTbLv.state == 2 && !sTb->lbChat)) { /* (this modded copy: the lobby's own chat panel) */
+        /* the game's box with the hosts' line (the buttons under it: Tb_DrawText); in a lobby what happened last */
         u16 *box = NULL;
 
         if (sTb->mode == TB_LOBBY && !sTb->lbChat && sTb->say <= 0) {
@@ -4117,7 +4993,9 @@ static void Tb_DrawText(void) {
     char **title = sTbTitle;
 
     /* its capitals centred on the crest beside it (y 32); up to the player card */
-    Ps_Heading(Tb_TitleLeft() + 44.0f, Ps_TextTop(32.0f, 1.3f), title[sTb->mode], 1.3f, 248.0f, 0x80);
+    if (!(sTb->mode == TB_LOBBY && sTbLv.state == 2)) { /* (this modded copy: the lobby's page has its own top) */
+        Ps_Heading(Tb_TitleLeft() + 44.0f, Ps_TextTop(32.0f, 1.3f), title[sTb->mode], 1.3f, 248.0f, 0x80);
+    }
     Tb_PageIn(1);
     switch (sTb->mode) {
     case TB_HUB:
@@ -4159,7 +5037,9 @@ static void Tb_DrawText(void) {
     }
     /* (no status and no title under it: "ONLINE" was not whether the game is connected, and the title is the
        screen's heading) */
-    Ps_Text(322.0f, Ps_TextTop(27.0f, 0.6f), (char *)Port_NetNameGet(), 0.6f, 166.0f, 1);
+    if (!(sTb->mode == TB_LOBBY && sTbLv.state == 2)) {
+        Ps_Text(322.0f, Ps_TextTop(27.0f, 0.6f), (char *)Port_NetNameGet(), 0.6f, 166.0f, 1);
+    }
     if (sTb->mode == TB_BLOCK) {
         Tb_DrawBlockText();
     }
@@ -4291,7 +5171,9 @@ s32 PortTbo_Run(void) {
         Tb_Speak();
         Ps_PageSet();
         Tb_Backdrop();
-        IconWin_Draw(); /* the clouds in the corners, the emblem, the line under the title */
+        if (!(sTb->mode == TB_LOBBY && sTbLv.state == 2)) { /* (this modded copy: not over the lobby's own top) */
+            IconWin_Draw(); /* the clouds in the corners, the emblem, the line under the title */
+        }
         Tb_Draw();
         Tb_DrawText();
         Ps_PromptsDraw();
@@ -4313,6 +5195,7 @@ s32 PortTbo_Run(void) {
         }
     }
     sceGsSyncPath(0, 0);
+    Mm_PairClose(); /* (this modded copy) the lobby's standing players: their models go before a match or the menus */
     Port_EscQuit(1);
     Port_TextMode(0);
     Tb_WinTerm();

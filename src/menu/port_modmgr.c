@@ -1322,6 +1322,26 @@ static void Mp_Place(u8 *o, s32 k, f32 x, f32 feetY, f32 fy, f32 dist, f32 want,
 
 /* Draws the two (before the select's movies, so its plates and chips are over them); says which side has its model
    standing (its portrait is then not drawn). */
+static s32 sMpFracOn;
+static f32 sMpFrac[3];
+
+/* 1 while the pair is open (the lobby opens and closes it with its page). */
+s32 Mm_PairIsOpen(void) {
+    return sMp.open;
+}
+
+void Mm_PairDraw(s32 *ready0, s32 *ready1);
+/* (18 Nov 2026) the lobby's squad: player 1's feet at (x, feet) and its height, as parts of the screen's width and
+   height; player 2 stands at 1 - x. */
+void Mm_PairDrawFrac(f32 x, f32 feet, f32 h, s32 *ready0, s32 *ready1) {
+    sMpFracOn = 1;
+    sMpFrac[0] = x;
+    sMpFrac[1] = feet;
+    sMpFrac[2] = h;
+    Mm_PairDraw(ready0, ready1);
+    sMpFracOn = 0;
+}
+
 void Mm_PairDraw(s32 *ready0, s32 *ready1) {
     MmCharaInfo *ref;
     u8 *obj;
@@ -1348,9 +1368,15 @@ void Mm_PairDraw(s32 *ready0, s32 *ready1) {
         return;
     }
     Mx_Begin();
-    place[0] = (f32)Mp_Setting("sel3d_x", 330);
-    place[1] = (f32)Mp_Setting("sel3d_feet", 640);
-    place[2] = (f32)Mp_Setting("sel3d_h", 470);
+    if (sMpFracOn) { /* (the lobby: where player 1 stands as parts of the screen; player 2 the same from the right) */
+        place[0] = sMpFrac[0] / Mx_ScreenFracX(1.0f);
+        place[1] = sMpFrac[1] / Mx_ScreenFracY(1.0f);
+        place[2] = sMpFrac[2] / Mx_SizeFracY(1.0f);
+    } else {
+        place[0] = (f32)Mp_Setting("sel3d_x", 330);
+        place[1] = (f32)Mp_Setting("sel3d_feet", 640);
+        place[2] = (f32)Mp_Setting("sel3d_h", 470);
+    }
     Mm_PlaceModel(ref, NULL, place, &sMp.p1Yaw, 0, &dist, &fy, &hf);
     /* the world height a fighter is given: what the viewer gives Goku at this camera, the bones a part of it */
     want = ref->dist * 0.647f / 1.115f * (f32)Mp_Setting("sel3d_fill", 900) / 1000.0f;

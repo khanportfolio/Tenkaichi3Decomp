@@ -3759,3 +3759,54 @@ void Ui_DrawGL(void) {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     }
 }
+
+/* (18 Nov 2026) The mouse for the game's own menus (the lobby, src/menu/port_tbo.c): where the pointer is over the
+   game's picture, in its 512 x 448 pixels (-1 off it), and what it did since the last poll: bit 0 it moved, bit 1 the
+   left button went down on the picture, bit 2 the right button. Not while one of these windows has the mouse. */
+static int sPtrX = -1, sPtrY = -1;
+extern "C" int Port_MenuPointerPoll(void) {
+    static float lastX = -1.0f, lastY = -1.0f;
+    static bool wasLeft, wasRight;
+    SDL_Window *w = GsDraw_Window();
+    float mx = 0.0f, my = 0.0f, dens;
+    SDL_MouseButtonFlags b;
+    bool left, right, mine;
+    int ev = 0;
+
+    if (w == NULL || gUiPresentW <= 0 || gUiPresentH <= 0) {
+        sPtrX = sPtrY = -1;
+        return 0;
+    }
+    b = SDL_GetMouseState(&mx, &my);
+    dens = SDL_GetWindowPixelDensity(w);
+    if (dens <= 0.0f) {
+        dens = 1.0f;
+    }
+    sPtrX = (int)(((mx * dens) - (float)gUiPresentX) * 512.0f / (float)gUiPresentW);
+    sPtrY = (int)(((my * dens) - (float)gUiPresentY) * 448.0f / (float)gUiPresentH);
+    if (sPtrX < 0 || sPtrX >= 512 || sPtrY < 0 || sPtrY >= 448 || !(SDL_GetWindowFlags(w) & SDL_WINDOW_MOUSE_FOCUS)) {
+        sPtrX = sPtrY = -1;
+    }
+    mine = ImGui::GetCurrentContext() != NULL && ImGui::GetIO().WantCaptureMouse; /* (a window of the overlay) */
+    if (mx != lastX || my != lastY) {
+        ev |= 1;
+    }
+    lastX = mx;
+    lastY = my;
+    left = (b & SDL_BUTTON_LMASK) != 0;
+    right = (b & SDL_BUTTON_RMASK) != 0;
+    if (left && !wasLeft && sPtrX >= 0) {
+        ev |= 2;
+    }
+    if (right && !wasRight && sPtrX >= 0) {
+        ev |= 4;
+    }
+    wasLeft = left;
+    wasRight = right;
+    if (mine || sPtrX < 0) {
+        ev &= ~7;
+    }
+    return ev;
+}
+extern "C" int Port_MenuPointerX(void) { return sPtrX; }
+extern "C" int Port_MenuPointerY(void) { return sPtrY; }
