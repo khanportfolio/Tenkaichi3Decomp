@@ -1076,6 +1076,7 @@ typedef struct MpFit {
 static MpFit sMpFit[2];
 extern s32 ChrView_CancelLoad(void);
 extern int Port_ModelSize(void); /* plat_charas.c: the largest model file */
+extern int Port_DataFingerprint(unsigned long long *out); /* plat_fprint.c: 1 known, 0 being worked out, -1 not done */
 
 static s32 Mp_Setting(const char *name, s32 def) {
     extern int Port_Setting(const char *name, int def);
@@ -1163,8 +1164,9 @@ void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
             sMp.rest[k]++;
         }
     }
-    if (!Mm_PairBusy() && !filesFree) {
-        return; /* (the select's turn) */
+    if (!Mm_PairBusy() && (!filesFree || Port_DataFingerprint(0) == 0)) {
+        return; /* (the select's turn; or the game's data are still being checked at start-up: a read now waits for
+                   the whole check, 25 s in the lobby on 18 Nov 2026) */
     }
     if (!sMp.ready) { /* the viewer's backdrop */
         sMp.started = 1;
@@ -1234,7 +1236,7 @@ void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
    thousand of the frame the bones fill, 900; hair and raised arms go past them), sel3d_turn1 / sel3d_turn2 (how far
    each side is turned to the other, hundredths of a radian: 15 and 45). */
 extern void *BtlObj_GetNode(void *obj, s32 node);
-extern void Port_Sel3dLog(int side, int chara, int bones, float h, float foot, float base); /* plat_charas.c (no stdio.h here: the Mac build refused it) */
+extern void Port_Sel3dLog(int side, int chara, int bones, int hMilli, int footMilli, int baseMilli); /* plat_charas.c (no stdio.h here: the Mac build refused it; whole numbers: the game's code passes floats its own way) */
 
 
 /* Top and bottom of the bones (the game's y is down) over the scale they were drawn at. */
@@ -1254,7 +1256,10 @@ static void Mp_Measure(MpFit *f, s32 chara, s32 side) {
         if (node == NULL) {
             continue;
         }
-        y = *(f32 *)(node + 0x44);
+        y = *(f32 *)(node + 0x44) - y0; /* (from the model's own place) */
+        if (y > 1000.0f || y < -1000.0f) {
+            continue; /* (a bone the hiding did not move: one stays at the world's origin, 18 Nov 2026) */
+        }
         if (y < top) {
             top = y;
         }
@@ -1268,9 +1273,9 @@ static void Mp_Measure(MpFit *f, s32 chara, s32 side) {
         return;
     }
     f->h = (low - top) / sc;
-    f->foot = (low - y0) / sc;
+    f->foot = low / sc;
     if (getenv("BT3_SEL3D_LOG") != NULL) {
-        Port_Sel3dLog(side, chara, n, f->h, f->foot, f->base);
+        Port_Sel3dLog(side, chara, n, (int)(f->h * 1000.0f), (int)(f->foot * 1000.0f), (int)(f->base * 1000.0f));
     }
 }
 
