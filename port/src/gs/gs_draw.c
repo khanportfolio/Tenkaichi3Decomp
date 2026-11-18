@@ -652,6 +652,7 @@ static GsTex tbo_extra_texture(uint32_t id) {
     GsTex tex;
     if (sExtraMissing[k]) return gsWhite;
     if (sExtraTex[k] != 0) return sExtraTex[k];
+    if (gDrawTboNs > 3000000ull) return clear_tex(); /* (this frame's share is used: TBO_FRAME_BUDGET) */
     if (sBackend->texSlotsLeft() <= 0) return gsWhite;
     if (id >= TBO_FACE_BASE) {
         snprintf(rel, sizeof(rel), "tbo/ui/faces/%03u.png", (unsigned)(id - TBO_FACE_BASE));
@@ -719,6 +720,12 @@ static GsTex tbo_texture(uint32_t id) {
     if (*missing) return gsWhite;
     if (*cached != 0) {
         return *cached;
+    }
+    /* 19 Nov 2026 (TBO_FRAME_BUDGET): the new lobby's ~40 large pictures were all made ready in its first frame, 475 to
+       700 ms (unpacking them and their smaller copies). A frame now takes 3 ms of that at most (one at least); the
+       rest are drawn as nothing and come in over the next frames. */
+    if (gDrawTboNs > 3000000ull) {
+        return clear_tex();
     }
     if (sBackend->texSlotsLeft() <= 0) {
         return gsWhite; /* (no room this frame: the next one tries again) */
