@@ -401,6 +401,9 @@ typedef struct TboScreen {
     s32 lbPick;         /* (this modded copy) a picker over the page: 0 none, 1 the fighters, 2 the maps */
     s32 lbPickCur;
     s32 lbPickTop;      /* (its first row shown) */
+    s32 lbQuick;        /* (this modded copy) the quick chat list is open */
+    s32 lbQuickCur;
+    s32 lbCount;        /* (this modded copy) the leader's START countdown: frames left, 0 none */
     s32 lbPopT;         /* frames since the window over the page opened */
     s32 lbPopClose;     /* frames left of its going (it slides out, then is gone) */
     s32 lbHostPose;     /* the hosts of the page the lobby's came from, who leave as it comes in (-1 none) */
@@ -2218,6 +2221,8 @@ static void Tb_LobbyOpen(void) {
     sTb->lbFocus = -1;
     sTb->lbRules = 0;
     sTb->lbPick = 0;
+    sTb->lbQuick = 0;
+    sTb->lbCount = 0;
     sTb->lbPicked = -1;
     sTb->lbPop = 0;
     sTb->lbChat = 0;
@@ -2471,7 +2476,7 @@ extern void PortVoice_SpeakerSet(int on);
 extern int Port_NetSession(void);
 
 enum {
-    LBI_COPY, LBI_LEAVE, LBI_P1, LBI_P2, LBI_W0, LBI_MIC = LBI_W0 + 6, LBI_SPK, LBI_INVITE, LBI_RANK, LBI_CHAT,
+    LBI_COPY, LBI_LEAVE, LBI_P1, LBI_P2, LBI_W0, LBI_MIC = LBI_W0 + 6, LBI_SPK, LBI_INVITE, LBI_RANK, LBI_QUICK, LBI_CHAT,
     LBI_MAP, LBI_RULES, LBI_FIGHTER, LBI_FRIENDS, LBI_START, LBI_COUNT
 };
 /* the mockup's boxes (1280 x 720 pixels) */
@@ -2485,6 +2490,7 @@ static const s16 kLbBox[LBI_COUNT][4] = {
     {112, 492, 168, 548},   /* SPEAKER */
     {182, 492, 238, 548},   /* INVITE */
     {252, 492, 308, 548},   /* RANKING */
+    {322, 492, 378, 548},   /* QUICK CHAT (18 Nov 2026) */
     {20, 580, 380, 700},    /* the chat */
     {980, 90, 1260, 300},   /* the map card */
     {980, 312, 1260, 400},  /* the rules */
@@ -2624,6 +2630,25 @@ static s32 Lb_StartAct(void) {
 }
 
 static void Lb_PickOpen(s32 kind);
+static s32 Lb_Pointer(f32 *x, f32 *y);
+/* (18 Nov 2026, BGMI's quick messages) one press, a line of chat to everyone */
+#define LB_QUICK_N 8
+static char *const kLbQuick[LB_QUICK_N] = {"Ready!", "GG", "One more?", "Nice!", "Wait for me", "Let's go!", "Good luck", "Change the map?"};
+
+static void Lb_QuickBox(s32 i, f32 *x0, f32 *y0, f32 *x1, f32 *y1) {
+    *x0 = Lb_X(40.0f);
+    *x1 = Lb_X(330.0f);
+    *y0 = Lb_Y(150.0f + 40.0f * (f32)i);
+    *y1 = *y0 + Lb_Y(34.0f);
+}
+
+/* The leader's START: a countdown of three seconds, said in the chat to everyone, then the match. */
+static void Lb_CountStart(void) {
+    sTb->lbCount = 181;
+    Port_LobbySay("Match starting in 3...");
+    Snd_PlaySe(1, 1);
+}
+
 static void Lb_RulesOpen(s32 row) {
     sTb->lbRules = 1;
     sTb->lbCol = 1;
@@ -2710,6 +2735,11 @@ static void Lb_Press(s32 it, s32 own) {
         PortFriends_Show(3);
         Tb_Note("RANKING: THE LEADERBOARD OF RANKED MATCHES");
         break;
+    case LBI_QUICK:
+        Snd_PlaySe(1, 1);
+        sTb->lbQuick = 1;
+        sTb->lbQuickCur = 0;
+        break;
     case LBI_CHAT:
         Tb_LobbyAction(LB_ACT_CHAT);
         break;
@@ -2731,6 +2761,8 @@ static void Lb_Press(s32 it, s32 own) {
         if (Lb_StartAct() == LB_ACT_START && !Tb_LobbyCanStart()) {
             Snd_PlaySe(1, 2);
             Tb_Note("WAITING FOR BOTH PLAYERS");
+        } else if (Lb_StartAct() == LB_ACT_START) {
+            Lb_CountStart();
         } else if (Lb_StartAct() != 0) {
             Tb_LobbyAction(Lb_StartAct());
         }
@@ -2751,6 +2783,68 @@ static void Lb_Update(s32 live, s32 own) {
         Ps_Prompt(2, "Cancel");
     }
     if (!live) {
+        return;
+    }
+    if (sTb->lbCount > 0) { /* the countdown: triangle or a right click calls it off */
+        if ((pad->gamePressed & PADG_TRIANGLE) || (ev & 4) || v->phase != 0 || !Tb_LobbyCanStart()) {
+            sTb->lbCount = 0;
+            Port_LobbySay("Start called off");
+            Snd_PlaySe(1, 2);
+            return;
+        }
+        sTb->lbCount--;
+        if (sTb->lbCount == 120) {
+            Port_LobbySay("2...");
+        } else if (sTb->lbCount == 60) {
+            Port_LobbySay("1...");
+        } else if (sTb->lbCount == 0) {
+            Tb_LobbyAction(LB_ACT_START);
+        }
+        return;
+    }
+    if (sTb->lbQuick) { /* the quick messages: up / down / cross, or a click; triangle, a right click back */
+        s32 q = sTb->lbQuickCur;
+        s32 i;
+        f32 mx;
+        f32 my;
+
+        if (Lb_Pointer(&mx, &my)) {
+            for (i = 0; i < LB_QUICK_N; i++) {
+                f32 x0;
+                f32 y0;
+                f32 x1;
+                f32 y1;
+
+                Lb_QuickBox(i, &x0, &y0, &x1, &y1);
+                if (mx >= x0 && mx <= x1 && my >= y0 && my <= y1) {
+                    if (ev & 1) {
+                        q = i;
+                    }
+                    if (ev & 2) {
+                        Port_LobbySay(kLbQuick[i]);
+                        Snd_PlaySe(1, 1);
+                        sTb->lbQuick = 0;
+                        return;
+                    }
+                }
+            }
+        }
+        if (pad->gameRepeat & (PADG_DOWN | PADG_DOWN2)) {
+            q = (q + 1) % LB_QUICK_N;
+            Snd_PlaySe(1, 0);
+        } else if (pad->gameRepeat & (PADG_UP | PADG_UP2)) {
+            q = (q + LB_QUICK_N - 1) % LB_QUICK_N;
+            Snd_PlaySe(1, 0);
+        }
+        sTb->lbQuickCur = q;
+        if (pad->gamePressed & PADG_CROSS) {
+            Port_LobbySay(kLbQuick[q]);
+            Snd_PlaySe(1, 1);
+            sTb->lbQuick = 0;
+        } else if ((pad->gamePressed & (PADG_TRIANGLE | PADG_CIRCLE)) || (ev & 4)) {
+            Snd_PlaySe(1, 2);
+            sTb->lbQuick = 0;
+        }
         return;
     }
     if (f < 0 || f >= LBI_COUNT) {
@@ -2782,7 +2876,11 @@ static void Lb_Update(s32 live, s32 own) {
     } else if ((pad->gamePressed & PADG_SQUARE) && sTb->lbPicked < 0) {
         Lb_Press(LBI_COPY, own);
     } else if ((pad->gamePressed & PADG_START) && v->owner && sTb->lbPicked < 0) {
-        Tb_LobbyStart();
+        if (Tb_LobbyCanStart()) {
+            Lb_CountStart();
+        } else {
+            Tb_LobbyStart();
+        }
     } else if ((pad->gamePressed & PADG_TRIANGLE) || (ev & 4)) {
         if (sTb->lbPicked >= 0) {
             Snd_PlaySe(1, 2);
@@ -2812,11 +2910,11 @@ static void Lb_Focus(s32 it) {
     f32 x1;
     f32 y1;
 
-    if (sTb->lbFocus != it || sTb->lbRules || sTb->lbPick || sTb->lbPop != 0 || sTb->lbChat) {
+    if (sTb->lbFocus != it || sTb->lbRules || sTb->lbPick || sTb->lbQuick || sTb->lbPop != 0 || sTb->lbChat) {
         return;
     }
     Lb_Box(it, &x0, &y0, &x1, &y1);
-    if (it >= LBI_MIC && it <= LBI_RANK) {
+    if (it >= LBI_MIC && it <= LBI_QUICK) {
         Ps_Disc((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (y1 - y0) * 0.5f + 3.5f, Ps_Rgba(0xFF, 0xD2, 0x3C, 0x80), Ps_Rgba(0xFF, 0xB0, 0x20, 0x80));
     } else {
         Ps_Pill(TBO_KIT_SEL, x0 - 3.0f, y0 - 3.0f, x1 + 3.0f, y1 + 3.0f, 0x80);
@@ -2913,7 +3011,7 @@ static void Lb_Draw(void) {
         }
     }
     /* the round buttons */
-    for (it = LBI_MIC; it <= LBI_RANK; it++) {
+    for (it = LBI_MIC; it <= LBI_QUICK; it++) {
         u32 mid = Ps_Rgba(0x18, 0x9C, 0x5C, 0x78);
         u32 edge = Ps_Rgba(0x10, 0x70, 0x40, 0x78);
 
@@ -2943,6 +3041,15 @@ static void Lb_Draw(void) {
     }
     if (v->stage >= 0) { /* the map's picture */
         Ps_Sprite(TBO_STAGE_BASE + v->stage, Lb_X(992.0f), Lb_Y(102.0f), Lb_X(1248.0f), Lb_Y(246.0f), 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+    }
+    if (sTb->lbQuick) { /* the quick messages over the lower left */
+        s32 i;
+
+        Ps_Panel(TBO_KIT_WINDOW, Lb_X(28.0f), Lb_Y(112.0f), Lb_X(342.0f), Lb_Y(480.0f), 0x80);
+        for (i = 0; i < LB_QUICK_N; i++) {
+            Lb_QuickBox(i, &x0, &y0, &x1, &y1);
+            Ps_Pill(i == sTb->lbQuickCur ? TBO_KIT_SEL : TBO_KIT_BAR, x0, y0, x1, y1, 0x80);
+        }
     }
 }
 
@@ -3065,8 +3172,8 @@ static void Lb_DrawText(void) {
         Ps_Align(0);
     }
     /* the round buttons' letters and names */
-    for (it = LBI_MIC; it <= LBI_RANK; it++) {
-        static char *const kIcon[4] = {"M", "S", "+", "R"};
+    for (it = LBI_MIC; it <= LBI_QUICK; it++) {
+        static char *const kIcon[5] = {"M", "S", "+", "R", "Q"};
         char *name = "INVITE";
 
         if (it == LBI_MIC) {
@@ -3075,11 +3182,26 @@ static void Lb_DrawText(void) {
             name = PortVoice_SpeakerOn() ? "SPEAKER" : "SPEAKER OFF";
         } else if (it == LBI_RANK) {
             name = "RANKING";
+        } else if (it == LBI_QUICK) {
+            name = "QUICK CHAT";
         }
         Lb_Box(it, &x0, &y0, &x1, &y1);
         Ps_Align(1);
         Ps_Text((x0 + x1) * 0.5f, Ps_TextTop((y0 + y1) * 0.5f, 0.9f), kIcon[it - LBI_MIC], 0.9f, 0.0f, 0);
         Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y1 + 9.0f, 0.36f), name, 0.36f, x1 - x0 + 14.0f, sTb->lbFocus == it ? 1 : 0);
+        Ps_Align(0);
+    }
+    if (sTb->lbQuick) { /* the quick messages */
+        Ps_Text(Lb_X(44.0f), Ps_TextTop(Lb_Y(130.0f), 0.42f), "QUICK CHAT: ONE PRESS SENDS IT", 0.42f, 0.0f, 2);
+        for (i = 0; i < LB_QUICK_N; i++) {
+            Lb_QuickBox(i, &x0, &y0, &x1, &y1);
+            Ps_Text(x0 + 12.0f, Ps_TextTop((y0 + y1) * 0.5f, 0.5f), kLbQuick[i], 0.5f, x1 - x0 - 20.0f, i == sTb->lbQuickCur ? 1 : 0);
+        }
+    }
+    if (sTb->lbCount > 0) { /* the leader's countdown */
+        Ps_Align(1);
+        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(330.0f), 3.2f), sTb->lbCount > 120 ? "3" : sTb->lbCount > 60 ? "2" : "1", 3.2f, 0.0f, 1);
+        Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(420.0f), 0.5f), "TRIANGLE: CALL IT OFF", 0.5f, 0.0f, 3);
         Ps_Align(0);
     }
     /* the chat: the last three things that happened */
