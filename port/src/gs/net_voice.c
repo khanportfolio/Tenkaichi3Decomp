@@ -140,6 +140,100 @@ void PortVoice_Reset(void) {
     sWantClose = 1; /* (closed on the game thread, which owns the streams) */
 }
 
+/* 18 Nov 2026 (the user: "not too loud, not too quiet, no background noise: the best setting"). Each 20 ms of the
+   microphone is cleaned before it is sent (tried first on test voices and rooms, a simulation of these same steps:
+   quiet, normal and loud voices all come out at -19..-21 dBFS; with nobody talking nothing is sent in a quiet room
+   and 2-4 % of the time with a fan, a hum or typing, mostly the first second while the room is learnt):
+   - a high-pass filter of two stages (about 100 Hz): rumble, mains hum and knocks on the desk go;
+   - the room's noise level is followed all the time: down at once, up quickly while nobody speaks (a fan or a hum
+     is learnt in about a second), hardly while someone does;
+   - the gate opens on 60 ms clearly above that level (x2.8, and above an absolute minimum): a key's click or a
+     knock is shorter; the 40 ms before the opening are sent too, so no word loses its start; while it is open,
+     40 ms are enough to keep it so, and it closes 0.4 s after the last;
+   - an automatic level brings speech to about -20 dBFS: a quiet microphone up to x8, a loud one down to x0.35,
+     raised slowly and lowered fast; a soft limiter above that, so shouting never cracks;
+   - in the hang between words the sound is a third as loud: the room is hardly heard.
+   BT3_MIC_LOG: every 2 s the level heard, the room's level and the gain, in the log. */
+#define MIC_TARGET 3300.0f
+#define MIC_MIN 180.0f
+static float sHp[4], sFloor = 120.0f, sGain = 2.0f;
+static int sLoudRun;
+static int16_t sPrev[2][VOICE_FRAME]; /* the last two frames (filtered), sent first when the gate opens */
+static uint8_t sPend[3][VOICE_FRAME];
+static int sPendN, sPendAt;
+
+static void mic_encode(const int16_t *pcm, float g, uint8_t *out) {
+    int i;
+    for (i = 0; i < VOICE_FRAME; i++) {
+        float y = (float)pcm[i] * g, a = y < 0.0f ? -y : y;
+        if (a > 20000.0f) {
+            a = 20000.0f + (a - 20000.0f) * 0.25f;
+        }
+        if (a > 32000.0f) {
+            a = 32000.0f;
+        }
+        out[i] = lin2ulaw((int16_t)(y < 0.0f ? -a : a));
+    }
+}
+
+/* 1: `out` holds the frame to send; 0: nothing (quiet). When the gate opens, the frames before come first. */
+static int mic_process(int16_t *pcm, uint8_t *out) {
+    float sum = 0.0f, rms;
+    uint64_t now = SDL_GetTicks();
+    int i, loud, voice, open = sSpokeMs != 0 && now - sSpokeMs <= HANG_MS;
+    static uint64_t logAt;
+    static int log = -1;
+    for (i = 0; i < VOICE_FRAME; i++) {
+        float x = (float)pcm[i], y1 = 0.927f * (sHp[1] + x - sHp[0]), y = 0.927f * (sHp[3] + y1 - sHp[2]);
+        sHp[0] = x;
+        sHp[1] = y1;
+        sHp[2] = y1;
+        sHp[3] = y;
+        pcm[i] = (int16_t)(y > 32767.0f ? 32767.0f : y < -32768.0f ? -32768.0f : y);
+        sum += y * y;
+    }
+    rms = SDL_sqrtf(sum / (float)VOICE_FRAME);
+    loud = rms > sFloor * 2.8f && rms > MIC_MIN;
+    sFloor += (rms - sFloor) * (rms < sFloor ? 0.20f : loud ? 0.0005f : 0.03f);
+    if (sFloor < 20.0f) {
+        sFloor = 20.0f;
+    }
+    sLoudRun = loud ? sLoudRun + 1 : 0;
+    voice = loud && (sLoudRun >= 3 || (sLoudRun >= 2 && open));
+    if (log < 0) {
+        log = getenv("BT3_MIC_LOG") != NULL;
+    }
+    if (log && now >= logAt) {
+        logAt = now + 2000;
+        SDL_Log("bt3: mic: level %.0f, room %.0f, gain x%.2f, %s", (double)rms, (double)sFloor, (double)sGain, voice ? "speaking" : "quiet");
+    }
+    if (voice) {
+        float want = MIC_TARGET / rms;
+        want = want > 8.0f ? 8.0f : want < 0.35f ? 0.35f : want;
+        sGain += (want - sGain) * (want < sGain ? 0.30f : 0.04f);
+        sSpokeMs = now;
+        if (!open) { /* (just opened: the 40 ms before it first, then this one) */
+            mic_encode(sPrev[0], sGain, sPend[0]);
+            mic_encode(sPrev[1], sGain, sPend[1]);
+            mic_encode(pcm, sGain, sPend[2]);
+            sPendN = 3;
+            sPendAt = 0;
+        }
+    }
+    memcpy(sPrev[0], sPrev[1], sizeof(sPrev[0]));
+    memcpy(sPrev[1], pcm, sizeof(sPrev[1]));
+    if (sPendN > 0) {
+        memcpy(out, sPend[sPendAt++], VOICE_FRAME);
+        sPendN--;
+        return 1;
+    }
+    if (!voice && !open) {
+        return 0;
+    }
+    mic_encode(pcm, voice ? sGain : sGain * 0.33f, out);
+    return 1;
+}
+
 int PortVoice_Outgoing(uint8_t *out) {
     static const SDL_AudioSpec spec = {SDL_AUDIO_S16, 1, RATE};
     int16_t pcm[VOICE_FRAME];
@@ -178,24 +272,19 @@ int PortVoice_Outgoing(uint8_t *out) {
         }
         SDL_ResumeAudioStreamDevice(sIn);
     }
+    if (sPendN > 0) { /* (the frames from before the gate opened, one a call) */
+        memcpy(out, sPend[sPendAt++], VOICE_FRAME);
+        sPendN--;
+        return VOICE_FRAME;
+    }
     if (SDL_GetAudioStreamAvailable(sIn) < (int)sizeof(pcm) || SDL_GetAudioStreamData(sIn, pcm, sizeof(pcm)) != (int)sizeof(pcm)) {
         return 0;
     }
     if (!PortVoice_MicOn()) {
         return 0; /* (push to talk, V not held: read and dropped) */
     }
-    for (i = 0; i < VOICE_FRAME; i++) {
-        level += abs(pcm[i]);
-    }
-    if (level / VOICE_FRAME >= GATE) {
-        sSpokeMs = SDL_GetTicks();
-    } else if (SDL_GetTicks() - sSpokeMs > HANG_MS) {
-        return 0; /* (quiet: nothing sent) */
-    }
-    for (i = 0; i < VOICE_FRAME; i++) {
-        out[i] = lin2ulaw(pcm[i]);
-    }
-    return VOICE_FRAME;
+    (void)level;
+    return mic_process(pcm, out) ? VOICE_FRAME : 0; /* (quiet: nothing sent) */
 }
 
 void PortVoice_HeardFrom(uint32_t who, const uint8_t *in, int n) {
