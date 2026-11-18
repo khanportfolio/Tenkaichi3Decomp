@@ -1646,6 +1646,15 @@ void Port_ActionHit(int attackerSide) {
 /* 18 Nov 2026: Goku Ultra Instinct's BT4 Meteor Smash (with its own effects pack again) is a longer cinematic than
    15 s and was cut at 450 frames, before its ending: a fighter may say its longest move in character.txt
    (move_frames=<frames>, 450..1800); BT3_WATCHDOG_FRAMES (testing) sets every limit, to measure a move's length. */
+/* BT3_FLASH_NAMES (19 Nov 2026): a movie's sprite instances into the log (src/sys/gfxm_c.c Flash_PortDumpClips). */
+int Port_FlashNamesWanted(void) {
+    return getenv("BT3_FLASH_NAMES") != NULL;
+}
+
+void Port_LogClip(int index, const char *name, int x, int y) {
+    fprintf(stderr, "bt3: flash clip %3d: %-40s at %d, %d\n", index, name, x, y);
+}
+
 int Port_ActionWatchdog(int side, int action, int frames, int chara) {
     static int sEnvLimit = -1;
     int rush = action >= 0x12D && action <= 0x12F, limit = rush ? WATCHDOG_RUSH_FRAMES : WATCHDOG_FRAMES;

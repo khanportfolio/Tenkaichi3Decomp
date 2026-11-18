@@ -364,6 +364,18 @@ void MainMenu_Draw(void) {
     Sprite_DrawPicture(gMainMenu->bg, 0, 0, 0x80);
 #endif
     flash = &gMainMenu->flash[0];
+#ifdef PORT
+    {
+        extern int Port_FlashNamesWanted(void);
+        extern void Flash_PortDumpClips(void *movie);
+        static s32 said;
+
+        if (!said && Port_FlashNamesWanted()) { /* (BT3_FLASH_NAMES: the movie's pieces, once) */
+            said = 1;
+            Flash_PortDumpClips(flash);
+        }
+    }
+#endif
     for (i = 0; i < 4; i++) {
         switch (i) {
         case 0:

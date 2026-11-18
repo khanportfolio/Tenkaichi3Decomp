@@ -1444,6 +1444,30 @@ void Flash_StepFrames(Flash *flash, s32 step) {
     FlashTl_StepFrames(flash->root, step);
 }
 
+#ifdef PORT
+/* BT3_FLASH_NAMES (19 Nov 2026, finding the main menu's pieces to restyle): every sprite instance of a movie, its
+   index, name and place, into the log (menu_a.c calls it once). */
+extern void Port_LogClip(s32 index, const char *name, s32 x, s32 y);
+extern void FlashClipList_GetPos(FlashClipList *list, FlashRef *ref, s32 *x, s32 *y);
+void Flash_PortDumpClips(void *movie) {
+    Flash *flash = (Flash *)movie;
+    u32 k;
+
+    for (k = 0; k < flash->clips->count; k++) {
+        FlashRef ref;
+        s32 x = 0;
+        s32 y = 0;
+
+        memset(&ref, 0, sizeof(ref));
+        FlashClipList_FindRef(flash->clips, NULL, flash->clips->items[k].name, &ref);
+        if (ref.index >= 0) {
+            FlashClipList_GetPos(flash->clips, &ref, &x, &y);
+        }
+        Port_LogClip((s32)k, flash->clips->items[k].name, x, y);
+    }
+}
+#endif
+
 /* Looks a sprite instance up by name ("mc_..."), optionally among the children of the instance called `parent`.
    out->index is -1 when there is none. (Existing name; it finds a clip, not a label.) */
 void Flash_FindLabel(Flash *flash, char *parent, char *name, FlashRef *out) {
