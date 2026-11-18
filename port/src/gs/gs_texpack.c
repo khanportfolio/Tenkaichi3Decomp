@@ -245,6 +245,15 @@ void TexPack_Init(void) {
         sBucket[h] = i + 1;
     }
     fprintf(stderr, "bt3: texture pack: %u replacement textures in %s (%u more with a name already seen)\n", sCount - dup, root, dup);
+    /* 18 Nov 2026: the home screen's video (263 MB) took about a second to read, and the menu's old background (Trunks
+       and Gotenks) showed until it came in: the menus' backdrop videos are asked for now, during the start-up, and
+       stay in memory (trim leaves them) */
+    for (i = 0; i < sCount; i++) {
+        if (sEntries[i].backdrop && sEntries[i].alias < 0) {
+            TexPackImage img;
+            (void)TexPack_Get((int)i, &img);
+        }
+    }
 }
 
 int TexPack_Count(void) {
@@ -556,7 +565,7 @@ static void trim(uint32_t keep) {
     while (sHeldBytes > sBudget / 4 * 3 && sHeldCount > 1) {
         uint32_t i, old = sHeldCount;
         for (i = 0; i < sHeldCount; i++) {
-            if (sHeld[i] != keep && (old == sHeldCount || sEntries[sHeld[i]].used < sEntries[sHeld[old]].used)) {
+            if (sHeld[i] != keep && !sEntries[sHeld[i]].backdrop && (old == sHeldCount || sEntries[sHeld[i]].used < sEntries[sHeld[old]].used)) {
                 old = i;
             }
         }

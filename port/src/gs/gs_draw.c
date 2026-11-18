@@ -1933,6 +1933,12 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
         gsDraws[gsDrawCount++] = d;
         return;
     }
+    if (sLast != NULL && !d.tex_is_target && sLast->tex == d.tex && sLast->backdrop && sLast->replaced != 1 &&
+        gsTargets[d.target].fbp == (uint32_t)gGsMainFbp && !lowres_now(d.target)) {
+        /* 18 Nov 2026: a backdrop video not read yet: its layers are left out (the menu over black) rather than
+           the menu's old background showing for a moment */
+        return;
+    }
     for (i = 0; i < n; i++) {
         if (fst) {
             s[i] = (float)v[i].u / 16.0f / tw * us;
