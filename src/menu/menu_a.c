@@ -495,44 +495,43 @@ static void MmNew_DrawList(void) {
  * any button, a click or Esc closes it.
  */
 #define MMNEW_KEY_C 6 /* SDL_SCANCODE_C */
-static const struct {
-    s32 kind; /* 0 heading, 1 a name, 2 a gap, 3 the last big line, 4 a small line */
-    const char *text;
-} kMmCredits[] = {
-    {0, "CREDITS"},
-    {2, ""},
-    {0, "Original Game"},
-    {1, "Dragon Ball Z: Budokai Tenkaichi 3"},
-    {4, "Developed by Spike"},
-    {4, "Published by Namco Bandai Games and Atari (2007)"},
-    {2, ""},
-    {0, "Dragon Ball"},
-    {1, "Created by Akira Toriyama"},
-    {4, "Bird Studio / Shueisha, Toei Animation"},
-    {2, ""},
-    {0, "PC Version"},
-    {1, "Tenkaichi3Decomp"},
-    {4, "The decompilation and PC port project and its contributors"},
-    {2, ""},
-    {0, "Extra Fighters and Moves"},
-    {1, "Dragon Ball Z: Budokai Tenkaichi 4 (fan mod)"},
-    {4, "Team BT4: fighters, moves and pictures"},
-    {2, ""},
-    {0, "3D Models"},
-    {1, "RaulV2 (CC-BY 4.0)"},
-    {1, "free122 (CC-BY 4.0)"},
-    {1, "Kinnikuchu"},
-    {2, ""},
-    {0, "Menus, Maps and Videos"},
-    {4, "Designs made with AI tools (ChatGPT, Google Flow)"},
-    {2, ""},
-    {2, ""},
-    {4, "Fan-made modification for personal use. Not affiliated with the owners above."},
-    {2, ""},
-    {2, ""},
-    {3, "Mod by A. Khan"},
+/* each line's kind: 0 a heading, 1 a name, 2 a gap, 3 the last big line, 4 a small line */
+static const s32 kMmCreditKind[] = {0, 2, 0, 1, 4, 4, 2, 0, 1, 4, 2, 0, 1, 4, 2, 0, 1, 4, 2, 0, 1, 1, 1, 2, 0, 4, 2, 2, 4, 2, 2, 3};
+static const char *const kMmCreditText[] = {
+    "CREDITS",
+    "",
+    "Original Game",
+    "Dragon Ball Z: Budokai Tenkaichi 3",
+    "Developed by Spike",
+    "Published by Namco Bandai Games and Atari (2007)",
+    "",
+    "Dragon Ball",
+    "Created by Akira Toriyama",
+    "Bird Studio / Shueisha, Toei Animation",
+    "",
+    "PC Version",
+    "Tenkaichi3Decomp",
+    "The decompilation and PC port project and its contributors",
+    "",
+    "Extra Fighters and Moves",
+    "Dragon Ball Z: Budokai Tenkaichi 4 (fan mod)",
+    "Team BT4: fighters, moves and pictures",
+    "",
+    "3D Models",
+    "RaulV2 (CC-BY 4.0)",
+    "free122 (CC-BY 4.0)",
+    "Kinnikuchu",
+    "",
+    "Menus, Maps and Videos",
+    "Designs made with AI tools (ChatGPT, Google Flow)",
+    "",
+    "",
+    "Fan-made modification for personal use. Not affiliated with the owners above.",
+    "",
+    "",
+    "Mod by A. Khan",
 };
-#define MMNEW_CREDIT_N ((s32)(sizeof(kMmCredits) / sizeof(kMmCredits[0])))
+#define MMNEW_CREDIT_N ((s32)(sizeof(kMmCreditKind) / sizeof(kMmCreditKind[0])))
 static s32 sMmCredits;    /* frames the credits are open, 0 closed */
 static s32 sMmBtnHover;   /* the pointer is on the button */
 static s32 sMmKeyC;       /* C was held last frame */
@@ -629,7 +628,7 @@ static void MmNew_DrawCredits(void) {
     }
     sMmCredits++;
     for (i = 0; i < MMNEW_CREDIT_N; i++) {
-        total += MmNew_LineH(kMmCredits[i].kind);
+        total += MmNew_LineH(kMmCreditKind[i]);
     }
     fade = sMmCredits * 6 > 0x70 ? (f32)0x70 : (f32)(sMmCredits * 6);
     Ps_Rect(Ps_Left(), 0.0f, 512.0f - Ps_Left(), 448.0f, Ps_Rgba(0, 0, 0, (s32)fade), Ps_Rgba(0, 0, 0, (s32)fade));
@@ -641,7 +640,7 @@ static void MmNew_DrawCredits(void) {
     y = 720.0f - roll;
     Ps_Align(1);
     for (i = 0; i < MMNEW_CREDIT_N; i++) {
-        k = kMmCredits[i].kind;
+        k = kMmCreditKind[i];
         cy = y + MmNew_LineH(k) * 0.5f;
         y += MmNew_LineH(k);
         if (k == 2 || cy < -40.0f || cy > 760.0f) {
@@ -659,11 +658,11 @@ static void MmNew_DrawCredits(void) {
         }
         scale = k == 0 ? 0.78f : k == 1 ? 0.62f : k == 3 ? 1.35f : 0.46f;
         if (k == 0 || k == 3) {
-            Ps_TextExOuter(MmNew_X(640.0f), Ps_TextTop(MmNew_Y(cy), scale), (char *)kMmCredits[i].text, scale,
+            Ps_TextExOuter(MmNew_X(640.0f), Ps_TextTop(MmNew_Y(cy), scale), (char *)kMmCreditText[i], scale,
                            MmNew_X(1200.0f) - MmNew_X(80.0f), Ps_Rgba(0xFF, 0xF0, 0x90, a), Ps_Rgba(0xFF, 0x8C, 0x10, a),
                            Ps_Rgba(0x3A, 0x16, 0x00, a), Ps_Rgba(0x00, 0x00, 0x00, a / 2), 2.0f);
         } else {
-            Ps_TextEx(MmNew_X(640.0f), Ps_TextTop(MmNew_Y(cy), scale), (char *)kMmCredits[i].text, scale,
+            Ps_TextEx(MmNew_X(640.0f), Ps_TextTop(MmNew_Y(cy), scale), (char *)kMmCreditText[i], scale,
                       MmNew_X(1200.0f) - MmNew_X(80.0f), Ps_Rgba(0xFF, 0xFF, 0xFF, a),
                       k == 4 ? Ps_Rgba(0xC8, 0xD4, 0xEC, a) : Ps_Rgba(0xDC, 0xE6, 0xFF, a), Ps_Rgba(0x06, 0x10, 0x26, a));
         }
