@@ -1138,9 +1138,23 @@ int Port_PadRead(int socket, unsigned char *data) {
     if (!gPortOverlayOpen && !gPortChatTyping && !sKeySwallow) {
         const bool *ks = SDL_GetKeyboardState(NULL);
         const int *k = sKeys[socket];
+        /* 18 Nov 2026 (the user: "sometimes K works as Enter, sometimes Enter does: make only Enter the Enter"): most
+           menus take Cross (K) as OK and only some START (Enter). Out of a fight, the START key is Cross and the
+           Cross key does nothing (setting menu_enter_ok, on unless 0); in a fight both are what they were. */
+        extern void *BtlChar_FindByObjId(int objId);
+        static int enterOk = -1;
+        int menus;
+        if (enterOk < 0) {
+            enterOk = Port_Setting("menu_enter_ok", 1) != 0;
+        }
+        menus = enterOk && BtlChar_FindByObjId(0) == NULL;
         for (a = 0; a < PORT_PAD_BUTTONS; a++) {
             if (k[a] > 0 && k[a] < SDL_SCANCODE_COUNT && ks[k[a]] && !(gPortTboTyping && typing_key(k[a]))) {
-                btn |= kActions[a].bit;
+                unsigned bit = kActions[a].bit;
+                if (menus && bit == B_CROSS) {
+                    continue;
+                }
+                btn |= menus && bit == B_START ? B_CROSS : bit;
             }
         }
 #define HELD(n) (k[n] > 0 && k[n] < SDL_SCANCODE_COUNT && ks[k[n]] && !(gPortTboTyping && typing_key(k[n])))
