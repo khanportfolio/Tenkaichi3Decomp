@@ -457,11 +457,11 @@ static unsigned char sLangMissing[3];
 /* Makes a texture of RGBA pixels (the GS's alpha) with its smaller copies, each half the one before, averaged by
    2 x 2: these pictures are mostly shown smaller than they are (letters, the crest), and one sample of the full
    picture per pixel shimmers. Takes `px`; 0 if no texture could be had. */
-static GsTex tbo_upload(uint32_t *px, uint32_t w, uint32_t h) {
-    uint32_t *lv[12];
-    uint32_t lw[12], lh[12], x, y;
+/* A picture's smaller copies (lv[0] = px), colour weighted by alpha; the count of levels. Plain C: the reading
+   thread uses it too (tbo_prepare). */
+static int tbo_mips(uint32_t *px, uint32_t w, uint32_t h, uint32_t **lv, uint32_t *lw, uint32_t *lh) {
+    uint32_t x, y;
     int levels = 1, k;
-    GsTex tex;
 
     lv[0] = px;
     lw[0] = w;
@@ -496,6 +496,16 @@ static GsTex tbo_upload(uint32_t *px, uint32_t w, uint32_t h) {
         lh[levels] = nh;
         levels++;
     }
+    return levels;
+}
+
+static GsTex tbo_upload(uint32_t *px, uint32_t w, uint32_t h) {
+    uint32_t *lv[12];
+    uint32_t lw[12], lh[12];
+    int levels, k;
+    GsTex tex;
+
+    levels = tbo_mips(px, w, h, lv, lw, lh);
     if (px != NULL && sBackend->texSlotsLeft() < levels) {
         for (k = 1; k < levels; k++) {
             free(lv[k]);
@@ -524,6 +534,8 @@ static struct {
     uint32_t version, frame;
 } sTboText[TBO_TEXT_SLOTS];
 
+static GsTex clear_tex(void);
+
 static GsTex tbo_text_texture(uint32_t id) {
     uint32_t slot = id - TBO_TEXT_BASE, version = TboText_Version(id), w, h, *px;
     GsTex tex;
@@ -534,6 +546,9 @@ static GsTex tbo_text_texture(uint32_t id) {
     }
     if (sBackend->texSlotsLeft() <= 0) {
         return sTboText[slot].tex != 0 ? sTboText[slot].tex : gsWhite;
+    }
+    if (gDrawTboNs > 3000000ull) { /* (19 Nov 2026: this frame's share of the online screens' work is used) */
+        return sTboText[slot].tex != 0 ? sTboText[slot].tex : clear_tex();
     }
     px = TboText_Pixels(id, &version, &w, &h);
     tex = px != NULL ? tbo_upload(px, w, h) : 0;
@@ -553,7 +568,72 @@ static GsTex tbo_text_texture(uint32_t id) {
    PNG files inside a frame, 170 ms for the lobby's background and buttons, longer for a page of faces or maps. They
    are read on a thread of their own now (png_async); until one is in, it is drawn as nothing (clear_tex). */
 #define PNG_IDS (TBO_EXTRA_BASE + TBO_EXTRA_COUNT)
-static struct { char path[3][300]; SDL_Surface *done; int state; } sPngJob[PNG_IDS]; /* state 0, 1 asked, 2 read */
+/* 19 Nov 2026: and made ready there too (tbo_prepare: the GS's alpha, the window's teal, the smaller copies): one
+   large picture alone (the new lobby's background) took ~200 ms in a frame; the frame only hands it over now. */
+typedef struct { uint32_t *lv[12]; uint32_t lw[12], lh[12]; int levels; } TboReady;
+
+static TboReady *tbo_prepare(uint32_t id, SDL_Surface *png) {
+    SDL_Surface *rgba = png->format == SDL_PIXELFORMAT_RGBA32 ? png : SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32);
+    TboReady *r;
+    uint32_t *px, w, h, x, y;
+
+    if (rgba != png) {
+        SDL_DestroySurface(png);
+    }
+    if (rgba == NULL) {
+        return NULL;
+    }
+    w = (uint32_t)rgba->w;
+    h = (uint32_t)rgba->h;
+    px = malloc((size_t)w * h * 4);
+    r = calloc(1, sizeof(*r));
+    if (px == NULL || r == NULL) {
+        free(px);
+        free(r);
+        SDL_DestroySurface(rgba);
+        return NULL;
+    }
+    for (y = 0; y < h; y++) {
+        const uint8_t *row = (const uint8_t *)rgba->pixels + (size_t)y * rgba->pitch;
+        for (x = 0; x < w; x++) {
+            const uint8_t *c = row + x * 4;
+            uint32_t a = ((uint32_t)c[3] * 128 + 127) / 255; /* the GS's alpha: 0x80 is opaque */
+            px[y * w + x] = (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) | (a << 24);
+            /* the window's teal bands as one teal (src/menu/port_tbo.c, Tb_Panel; as tbo_texture did) */
+            if (id == TBO_KIT_WINDOW && c[3] == 255 && c[0] < 60 && c[1] >= 60 && c[1] <= 125 && c[2] + 10 >= c[1] && c[2] <= c[1] + 15) {
+                px[y * w + x] = 27u | (86u << 8) | (92u << 16) | (a << 24);
+            }
+        }
+    }
+    SDL_DestroySurface(rgba);
+    r->levels = tbo_mips(px, w, h, r->lv, r->lw, r->lh);
+    return r;
+}
+
+/* A ready picture to the graphics card (fast: no work on the pixels); 0 when it could not be made. Frees `r`. */
+static GsTex tbo_upload_ready(TboReady *r) {
+    int k, n = r->levels;
+    GsTex tex;
+
+    if (sBackend->texSlotsLeft() < n) {
+        for (k = 1; k < n; k++) {
+            free(r->lv[k]);
+        }
+        n = 1;
+    }
+    tex = sBackend->texCreate(r->lw[0], r->lh[0], GS_TEXFMT_RGBA8, n);
+    for (k = 0; k < n; k++) {
+        if (tex != 0) {
+            sBackend->texUpload(tex, k, r->lw[k], r->lh[k], GS_TEXFMT_RGBA8, r->lv[k], r->lw[k] * r->lh[k] * 4);
+        } else {
+            free(r->lv[k]);
+        }
+    }
+    free(r);
+    return tex;
+}
+
+static struct { char path[3][300]; TboReady *done; int state; } sPngJob[PNG_IDS]; /* state 0, 1 asked, 2 read */
 static SDL_Mutex *sPngLock;
 static SDL_Condition *sPngWake;
 static int sPngThread = -1; /* -1 not started, 0 none (read in the frame, as before), 1 running */
@@ -580,13 +660,11 @@ static int png_worker(void *unused) {
                 png = SDL_LoadPNG(sPngJob[k].path[j]);
             }
         }
-        if (png != NULL && png->format != SDL_PIXELFORMAT_RGBA32) { /* (the conversion here too, not in a frame) */
-            SDL_Surface *r = SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32);
-            SDL_DestroySurface(png);
-            png = r;
+        {
+            TboReady *ready = png != NULL ? tbo_prepare((uint32_t)k, png) : NULL; /* (all of the work here, not in a frame) */
+            SDL_LockMutex(sPngLock);
+            sPngJob[k].done = ready;
         }
-        SDL_LockMutex(sPngLock);
-        sPngJob[k].done = png;
         sPngJob[k].state = 2;
         SDL_UnlockMutex(sPngLock);
     }
@@ -595,8 +673,8 @@ static int png_worker(void *unused) {
 
 /* Picture `id` from the first of the paths that reads: the PNG once it is in (the caller's; NULL: none of them), or
    NULL with *wait set while it is being read. */
-static SDL_Surface *png_async(uint32_t id, const char *p0, const char *p1, const char *p2, int *wait) {
-    SDL_Surface *s = NULL;
+static TboReady *png_async(uint32_t id, const char *p0, const char *p1, const char *p2, int *wait) {
+    TboReady *s = NULL;
     *wait = 0;
     if (sPngThread < 0) {
         sPngLock = SDL_CreateMutex();
@@ -604,10 +682,10 @@ static SDL_Surface *png_async(uint32_t id, const char *p0, const char *p1, const
         sPngThread = sPngLock != NULL && sPngWake != NULL && SDL_CreateThread(png_worker, "bt3-pictures", NULL) != NULL;
     }
     if (sPngThread == 0 || id >= PNG_IDS) {
-        s = SDL_LoadPNG(p0);
-        if (s == NULL && p1 != NULL) s = SDL_LoadPNG(p1);
-        if (s == NULL && p2 != NULL) s = SDL_LoadPNG(p2);
-        return s;
+        SDL_Surface *png = SDL_LoadPNG(p0);
+        if (png == NULL && p1 != NULL) png = SDL_LoadPNG(p1);
+        if (png == NULL && p2 != NULL) png = SDL_LoadPNG(p2);
+        return png != NULL ? tbo_prepare(id, png) : NULL;
     }
     SDL_LockMutex(sPngLock);
     if (sPngJob[id].state == 0) {
@@ -646,8 +724,7 @@ static GsTex sExtraTex[TBO_EXTRA_COUNT];
 static unsigned char sExtraMissing[TBO_EXTRA_COUNT];
 static GsTex tbo_extra_texture(uint32_t id) {
     char path[1024], rel[96];
-    SDL_Surface *png, *rgba;
-    uint32_t *px, w, h, x, y, k = id - TBO_EXTRA_BASE;
+    uint32_t k = id - TBO_EXTRA_BASE;
     const char *base;
     GsTex tex;
     if (sExtraMissing[k]) return gsWhite;
@@ -667,31 +744,17 @@ static GsTex tbo_extra_texture(uint32_t id) {
     snprintf(path, sizeof(path), "%s%s", base != NULL ? base : "", rel);
     {
         int wait;
-        png = png_async(id, path, rel, NULL, &wait);
+        TboReady *ready = png_async(id, path, rel, NULL, &wait);
         if (wait) return clear_tex(); /* (still being read: nothing this frame) */
-    }
-    rgba = png != NULL && png->format == SDL_PIXELFORMAT_RGBA32 ? png : png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
-    if (png != NULL && png != rgba) SDL_DestroySurface(png);
-    if (rgba == NULL) {
-        sExtraMissing[k] = 1;
-        return gsWhite;
-    }
-    w = (uint32_t)rgba->w;
-    h = (uint32_t)rgba->h;
-    px = malloc((size_t)w * h * 4);
-    for (y = 0; px != NULL && y < h; y++) {
-        const uint8_t *row = (const uint8_t *)rgba->pixels + (size_t)y * rgba->pitch;
-        for (x = 0; x < w; x++) {
-            const uint8_t *c = row + x * 4;
-            px[y * w + x] = (uint32_t)c[0] | ((uint32_t)c[1] << 8) | ((uint32_t)c[2] << 16) | (((uint32_t)c[3] * 128 + 127) / 255 << 24);
+        if (ready == NULL) {
+            sExtraMissing[k] = 1;
+            return gsWhite;
         }
+        tex = tbo_upload_ready(ready);
+        if (tex == 0) return gsWhite;
+        sExtraTex[k] = tex;
+        return tex;
     }
-    SDL_DestroySurface(rgba);
-    if (px == NULL) return gsWhite;
-    tex = tbo_upload(px, w, h);
-    if (tex == 0) return gsWhite;
-    sExtraTex[k] = tex;
-    return tex;
 }
 
 static GsTex tbo_texture(uint32_t id) {
@@ -743,9 +806,23 @@ static GsTex tbo_texture(uint32_t id) {
         snprintf(path, sizeof(path), "%stbo/ui/%s.png", base != NULL ? base : "", kTboNames[id]);
         snprintf(rel1, sizeof(rel1), "tbo/ui/%s.png", kTboNames[id]);
         snprintf(rel2, sizeof(rel2), "port/tbo/ui/%s.png", kTboNames[id]); /* (a source checkout: where they are kept) */
-        png = png_async(id, path, rel1, rel2, &wait);
-        if (wait) {
-            return clear_tex(); /* (still being read: nothing this frame) */
+        {
+            TboReady *ready = png_async(id, path, rel1, rel2, &wait);
+            if (wait) {
+                return clear_tex(); /* (still being read: nothing this frame) */
+            }
+            if (ready == NULL) {
+                fprintf(stderr, "bt3: artwork: cannot read %s\n", path);
+                *missing = 1;
+                return gsWhite;
+            }
+            tex = tbo_upload_ready(ready);
+            if (tex == 0) {
+                return gsWhite;
+            }
+            *cached = tex;
+            fprintf(stderr, "bt3: artwork: %s (ready on the reading thread)\n", path);
+            return tex;
         }
     }
     rgba = png != NULL && png->format == SDL_PIXELFORMAT_RGBA32 ? png : png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
