@@ -152,7 +152,7 @@ extern void BtlObj_AddSway(void *obj, f32 a, f32 b);
 extern BtlActRoster *gBtlChars;
 extern BtlActHandler gBtlActHandlers[BTLACT_COUNT];
 #ifdef PORT
-extern int Port_ActionWatchdog(int side, int action, int frames); /* plat_charas.c */
+extern int Port_ActionWatchdog(int side, int action, int frames, int chara); /* plat_charas.c */
 extern void Port_TestAction(int side, int from, int to, int frames); /* plat_charas.c: BT3_TEST_FULL's log */
 extern void BtlMember_TestFull(BtlActChr *chr); /* btl_char_member.c: BT3_TEST_FULL's full gauges */
 #endif
@@ -1194,7 +1194,7 @@ void BtlAct_Update(BtlActChr *chr) {
             }
             sVictim[s] = 0;
         }
-        if (act->request == -1 && !((s == 0 || s == 1) && sEndAt[s] >= 0) && Port_ActionWatchdog(s, act->current, chr->actionFrame)) {
+        if (act->request == -1 && !((s == 0 || s == 1) && sEndAt[s] >= 0) && Port_ActionWatchdog(s, act->current, chr->actionFrame, BtlMember_GetActive(chr)->chara)) {
             if ((s == 0 || s == 1) && sEndAt[s] < 0) {
                 chr->work[1] = 1;
                 sVictim[s ^ 1] = 1;

@@ -76,6 +76,7 @@ typedef struct {
     int omni;                  /* omni=1: see Port_OmniDamage */
     int damage;                /* damage=<percent> the fighter's hits do (Port_OmniDamage); 0 = not said (100) */
     int ultBlast;              /* ultimate_blast=<stocks>: see Port_CharaUltBlast; 0 = not said */
+    int moveFrames;            /* move_frames=<frames>: its longest technique (Port_ActionWatchdog); 0 = not said */
     int pkg;                   /* its entry in sPkg, or -1 */
     short par[PAR_COUNT];      /* bytes of the parameter block from 0x98 (PAR_*): -1 not said */
     unsigned char freshSet;    /* bits 0..3: `<slot>_fresh` said (bit 4 + k of +0xAD) */
@@ -348,6 +349,8 @@ static void apply(Chara *c, const char *key, const char *value) {
         c->omni = strcmp(value, "1") == 0;
     } else if (strcmp(key, "damage") == 0) {
         c->damage = number(value, 10, 1000, &x) ? x : 0;
+    } else if (strcmp(key, "move_frames") == 0) {
+        c->moveFrames = number(value, 450, 1800, &x) ? x : 0;
     } else if (strcmp(key, "ultimate_blast") == 0) {
         c->ultBlast = number(value, 1, 7, &x) ? x : 0;
     } else if (strcmp(key, "form") == 0) {
@@ -1640,8 +1643,24 @@ void Port_ActionHit(int attackerSide) {
     }
 }
 
-int Port_ActionWatchdog(int side, int action, int frames) {
+/* 18 Nov 2026: Goku Ultra Instinct's BT4 Meteor Smash (with its own effects pack again) is a longer cinematic than
+   15 s and was cut at 450 frames, before its ending: a fighter may say its longest move in character.txt
+   (move_frames=<frames>, 450..1800); BT3_WATCHDOG_FRAMES (testing) sets every limit, to measure a move's length. */
+int Port_ActionWatchdog(int side, int action, int frames, int chara) {
+    static int sEnvLimit = -1;
     int rush = action >= 0x12D && action <= 0x12F, limit = rush ? WATCHDOG_RUSH_FRAMES : WATCHDOG_FRAMES;
+    Chara *c = chara >= PORT_CHARA_FIRST ? chara_of(chara) : NULL;
+
+    if (sEnvLimit < 0) {
+        const char *e = getenv("BT3_WATCHDOG_FRAMES");
+        sEnvLimit = e != NULL ? atoi(e) : 0;
+    }
+    if (c != NULL && c->moveFrames > limit) {
+        limit = c->moveFrames;
+    }
+    if (sEnvLimit > 0) {
+        limit = sEnvLimit;
+    }
 
     if (Port_NetModsHidden()) {
         return 0;
