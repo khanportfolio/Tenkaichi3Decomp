@@ -195,6 +195,9 @@ void PortInput_Swallow(void) { sSwallow = 2; }
 int Port_KeyScanHeld(int sc) {
     const bool *ks = SDL_GetKeyboardState(NULL);
 
+    if (SDL_GetKeyboardFocus() == NULL) { /* (only while the game's window has the keyboard: typing elsewhere is not the game's) */
+        return 0;
+    }
     return ks != NULL && sc > 0 && sc < SDL_SCANCODE_COUNT && ks[sc];
 }
 void PortInput_SwallowKeys(void) { sKeySwallow = 1; }
