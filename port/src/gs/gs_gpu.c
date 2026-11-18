@@ -884,6 +884,10 @@ static int vk_init(void) {
 #endif
         fprintf(stderr, "bt3: GPU renderer: %s%s%s%s%s\n", SDL_GetGPUDeviceDriver(sDev), name[0] ? ", " : "", name,
                 driver[0] ? ", driver " : "", driver);
+        {
+            extern char gGsGpuName[160]; /* gs_draw.c: automatic quality */
+            snprintf(gGsGpuName, sizeof(gGsGpuName), "%s", name);
+        }
     }
     fprintf(stderr, "bt3: %d logical processors, %d MB of memory\n", SDL_GetNumLogicalCPUCores(), SDL_GetSystemRAM());
     pipelines_preload();

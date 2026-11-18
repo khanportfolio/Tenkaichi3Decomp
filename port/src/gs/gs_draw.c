@@ -2681,9 +2681,77 @@ void GsGpu_Native(int effect) {
     gsDraws[gsDrawCount++] = d;
 }
 
+/* (18 Nov 2026) Automatic quality (setting auto_quality, on unless the player chose by hand in F1 > Video): the user
+   shares the game, so each PC is to get what suits it. Measured on the user's laptop (i5-9300H, GTX 1650, 60 Hz):
+   a picture costs about the same at 2x, 3x and 4x (12.1, 12.2, 13.0 ms: the processor's work, not the graphics
+   card's), so the resolution follows the screen and the kind of graphics chip, and smooth motion follows the
+   screen's refresh rate (pictures the screen cannot show only cost time):
+     smooth motion  60 Hz -> 60 a second, 100 Hz and more -> 120, 200 Hz and more -> 240
+     resolution     a graphics card: one step above the screen's height (1080p -> 4x, 1440p -> 5x, 4K -> 6x);
+                    a chip built into the processor (Intel, AMD's Radeon Graphics): one below, 2x at least
+   A machine that still cannot keep up drops in-between pictures itself (interp_cost). */
+int gsAutoQuality = -1;
+char gGsGpuName[160]; /* (gs_gpu.c: the graphics chip's name) */
+static int sAutoInterp = -1;
+
+int GsDraw_AutoQuality(void) {
+    if (gsAutoQuality < 0) {
+        gsAutoQuality = Port_Setting("auto_quality", 1) != 0;
+    }
+    return gsAutoQuality;
+}
+
+void GsDraw_AutoQualitySet(int on) {
+    gsAutoQuality = on != 0;
+    Port_SettingSave("auto_quality", gsAutoQuality);
+    Port_SettingsWrite();
+}
+
+static void auto_quality_pick(void) {
+    static int done;
+    const SDL_DisplayMode *m = NULL;
+    SDL_Window *w;
+    int hz = 60, h = 1080, base, scale, chip;
+
+    if (done || !GsDraw_AutoQuality()) {
+        return;
+    }
+    done = 1;
+    w = GsDraw_Window();
+    if (w != NULL) {
+        m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(w));
+    }
+    if (m == NULL) {
+        m = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+    }
+    if (m != NULL) {
+        if (m->refresh_rate > 1.0f) {
+            hz = (int)(m->refresh_rate + 0.5f);
+        }
+        if (m->h > 0) {
+            h = m->h;
+        }
+    }
+    chip = strstr(gGsGpuName, "Intel") != NULL || strstr(gGsGpuName, "UHD") != NULL || strstr(gGsGpuName, "Iris") != NULL ||
+           strstr(gGsGpuName, "Radeon(TM) Graphics") != NULL || strstr(gGsGpuName, "Radeon Graphics") != NULL ||
+           strstr(gGsGpuName, "Vega") != NULL;
+    sAutoInterp = hz >= 200 ? 3 : hz >= 100 ? 2 : 1;
+    if (gsInterp >= 0 && getenv("BT3_INTERP") == NULL) {
+        gsInterp = sAutoInterp; /* (already set up: the new number from now on) */
+    }
+    base = (h + 447) / 448;
+    scale = chip ? (base - 1 < 2 ? 2 : base - 1) : (base + 1 > 6 ? 6 : base + 1);
+    if (getenv("BT3_SCALE") == NULL && scale != gsScale) {
+        gsPendingScale = scale;
+    }
+    fprintf(stderr, "bt3: automatic quality: %d Hz, %d lines, %s -> smooth motion %d a second, resolution %dx\n", hz, h,
+            chip ? "graphics built into the processor" : "a graphics card", 30 << sAutoInterp, scale);
+}
+
 /* A new resolution multiplier: every render target is dropped and made again at the new size when the game next
    draws to it. Buffers that carry something over from the previous frame start empty for one frame. */
 static void scale_apply(void) {
+    auto_quality_pick();
     if (gsPendingScale == 0 || gsPendingScale == gsScale) {
         gsPendingScale = 0;
         return;
@@ -5484,7 +5552,8 @@ void GsGpu_FrameEnd(void) {
             }
         }
         if (gsInterp < 0) {
-            gsInterp = getenv("BT3_INTERP") != NULL ? atoi(getenv("BT3_INTERP")) : Port_Setting("interp", 0);
+            auto_quality_pick();
+            gsInterp = getenv("BT3_INTERP") != NULL ? atoi(getenv("BT3_INTERP")) : sAutoInterp >= 0 ? sAutoInterp : Port_Setting("interp", 0);
             gsInterp = gsInterp < 0 ? 0 : gsInterp > 3 ? 3 : gsInterp;
             sInterpPrev = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));
             sInterpBlend = malloc(MAX_VU_UNIFORMS * sizeof(Vu0Uniform));

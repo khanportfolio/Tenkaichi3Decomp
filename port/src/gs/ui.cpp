@@ -1368,16 +1368,26 @@ static bool tab(const char *label, int index) {
     return on;
 }
 
+extern "C" int GsDraw_AutoQuality(void);       // gs_draw.c: automatic quality (18 Nov 2026)
+extern "C" void GsDraw_AutoQualitySet(int on);
 static void video_tab(PortVideo &v) {
     static const struct { const char *name; int milli; } aspects[] = {{"4:3 (original)", 1333}, {"16:10", 1600}, {"16:9", 1778}, {"21:9", 2389}, {"32:9", 3556}};
     char label[64];
     int best = 0, count = 0;
 
+    {
+        bool autoQ = GsDraw_AutoQuality() != 0;
+        if (ImGui::Checkbox("Automatic quality (best for this PC)", &autoQ)) {
+            GsDraw_AutoQualitySet(autoQ ? 1 : 0);
+        }
+        ImGui::SetItemTooltip("On: the game picks the resolution and Smooth motion for this PC itself (its screen and\n"
+                              "graphics chip), from the next start. Choosing either below by hand switches this off.");
+    }
     snprintf(label, sizeof(label), "%dx  (%d x %d)", v.scale, 512 * v.scale, 448 * v.scale);
     if (ImGui::BeginCombo("Internal resolution", label)) {
         for (int n = 1; n <= 8; n++) {
             snprintf(label, sizeof(label), "%dx  (%d x %d)", n, 512 * n, 448 * n);
-            if (ImGui::Selectable(label, n == v.scale)) { v.scale = n; }
+            if (ImGui::Selectable(label, n == v.scale)) { v.scale = n; GsDraw_AutoQualitySet(0); }
         }
         ImGui::EndCombo();
     }
@@ -1474,6 +1484,7 @@ static void video_tab(PortVideo &v) {
         int smooth = gsInterp < 0 ? 0 : gsInterp > 3 ? 3 : gsInterp;
         ImGui::SetNextItemWidth(U(416.0f));
         if (ImGui::Combo("Smooth motion", &smooth, kSmooth, 4)) {
+            GsDraw_AutoQualitySet(0); // (chosen by hand)
             gsInterp = smooth;
             Port_SettingSave("interp", gsInterp);
             Port_SettingsWrite();
