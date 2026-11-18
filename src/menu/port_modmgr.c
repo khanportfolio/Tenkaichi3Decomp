@@ -1146,6 +1146,15 @@ static void Mp_P2Drop(void) {
     sMp.p2Shown = -1;
 }
 
+/* The fighters whose model the viewer cannot stand up: Dr. Wheelo crashed it (18 Nov 2026, the every-fighter walk:
+   the giant machine's model is not a fighter's), Hirudegarn is the same kind of giant. They keep their picture.
+   (The Great Apes stand fine: they are made the frame's size like everyone.) An added fighter counts as its base. */
+static s32 Mp_CanStand(s32 chara) {
+    s32 base = CHARA_T(chara);
+
+    return base != 120 && base != 139;
+}
+
 /* Each frame: what each side shows (chara * 4 + costume, -1 none), and whether the select's own reads are idle. */
 void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
     s32 k;
@@ -1154,8 +1163,8 @@ void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
     if (!sMp.open) {
         return;
     }
-    w[0] = want0;
-    w[1] = want1;
+    w[0] = want0 >= 0 && Mp_CanStand(want0 / 4) ? want0 : -1;
+    w[1] = want1 >= 0 && Mp_CanStand(want1 / 4) ? want1 : -1;
     for (k = 0; k < 2; k++) {
         if (w[k] != sMp.want[k]) {
             sMp.want[k] = w[k];

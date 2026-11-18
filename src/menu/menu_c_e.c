@@ -928,9 +928,10 @@ static void CharSel_Port3D(void) {
         if (e != NULL && atoi(e) > 0) {
             s32 n = 161 + PORT_CHARA_MAX;
             s32 step = sCycleFrame++ / atoi(e);
+            s32 from = getenv("BT3_SEL3D_CYCLE_FROM") != NULL ? atoi(getenv("BT3_SEL3D_CYCLE_FROM")) : 0; /* (where the walk begins) */
 
             for (i = 0; i < 2; i++) {
-                s32 c = (step * 2 + i) % n;
+                s32 c = (from + step * 2 + i) % n;
 
                 if (c >= 161) {
                     c = PORT_CHARA_FIRST + (c - 161);
