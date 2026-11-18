@@ -526,7 +526,9 @@ void Port_LobbyDo(int what, int a, int b) {
     c.kind = CMD_DO;
     c.a = what;
     c.b = a;
-    c.text[0] = (char)b; /* (the second number, -1 / +1 / 0..7: one byte) */
+    /* (18 Nov 2026: the whole number. One byte held -1 / +1 / 0..7, but the map picker sends 1000 + the stage's id + 1:
+       1003 became -21, and the lobby stepped 21 maps back instead of taking the one clicked) */
+    memcpy(c.text, &b, sizeof(b));
     queue_put(&c);
 }
 
@@ -2429,7 +2431,9 @@ static void do_cmd(const Cmd *c) {
         return;
     }
     if (sL.on == 1) {
-        owner_do(c->a, c->b, (signed char)c->text[0]);
+        int b;
+        memcpy(&b, c->text, sizeof(b));
+        owner_do(c->a, c->b, b);
     } else if (c->a == LOBBY_READY && sL.state == 2) {
         sL.wantReady = c->b != 0;
         alive_send();

@@ -1152,7 +1152,9 @@ static void Mp_P2Drop(void) {
 static s32 Mp_CanStand(s32 chara) {
     s32 base = CHARA_T(chara);
 
-    return base != 120 && base != 139;
+    /* (18 Nov 2026: Great Ape Baby, 143, crashed the lobby's viewer measuring its bones; the three Great Apes are
+       giants that never fit the view anyway: they keep their picture, as Wheelo and Hirudegarn do) */
+    return base != 120 && base != 139 && base != 12 && base != 30 && base != 143;
 }
 
 /* Each frame: what each side shows (chara * 4 + costume, -1 none), and whether the select's own reads are idle. */
