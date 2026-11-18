@@ -1,5 +1,4 @@
 #include "common.h"
-#include <stdio.h> /* (the 3D select's measures, BT3_SEL3D_LOG) */
 #include "menu/menu_e.h"
 #include "sys/pad.h"
 #include "sys/save.h"
@@ -1235,6 +1234,7 @@ void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
    thousand of the frame the bones fill, 900; hair and raised arms go past them), sel3d_turn1 / sel3d_turn2 (how far
    each side is turned to the other, hundredths of a radian: 15 and 45). */
 extern void *BtlObj_GetNode(void *obj, s32 node);
+extern void Port_Sel3dLog(int side, int chara, int bones, float h, float foot, float base); /* plat_charas.c (no stdio.h here: the Mac build refused it) */
 
 
 /* Top and bottom of the bones (the game's y is down) over the scale they were drawn at. */
@@ -1270,8 +1270,7 @@ static void Mp_Measure(MpFit *f, s32 chara, s32 side) {
     f->h = (low - top) / sc;
     f->foot = (low - y0) / sc;
     if (getenv("BT3_SEL3D_LOG") != NULL) {
-        fprintf(stderr, "bt3: sel3d: side %d chara %d bones %d height %.3f foot %.3f base %.4f\n", (int)side, (int)chara, (int)n,
-                (double)f->h, (double)f->foot, (double)f->base);
+        Port_Sel3dLog(side, chara, n, f->h, f->foot, f->base);
     }
 }
 

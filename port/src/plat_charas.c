@@ -2390,3 +2390,9 @@ int Port_TestCellIs(int id) {
     }
     return id >= PORT_CHARA_FIRST && id < PORT_CHARA_FIRST + PORT_CHARA_MAX;
 }
+
+/* (17 Nov 2026) the duel select's 3D models: each one's measure (src/menu/port_modmgr.c Mp_Measure, BT3_SEL3D_LOG) */
+void Port_Sel3dLog(int side, int chara, int bones, float h, float foot, float base) {
+    fprintf(stderr, "bt3: sel3d: side %d chara %d bones %d height %.3f foot %.3f base %.4f\n", side, chara, bones, (double)h,
+            (double)foot, (double)base);
+}
