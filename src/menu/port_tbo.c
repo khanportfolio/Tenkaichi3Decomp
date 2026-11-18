@@ -398,6 +398,9 @@ typedef struct TboScreen {
     s32 lbChat;         /* the keypad for a line of chat is up */
     s32 lbFocus;        /* (this modded copy) the page's button under the cursor (LBI_), -1 not yet */
     s32 lbRules;        /* (this modded copy) the rules window (the old right side) is over the page */
+    s32 lbPick;         /* (this modded copy) a picker over the page: 0 none, 1 the fighters, 2 the maps */
+    s32 lbPickCur;
+    s32 lbPickTop;      /* (its first row shown) */
     s32 lbPopT;         /* frames since the window over the page opened */
     s32 lbPopClose;     /* frames left of its going (it slides out, then is gone) */
     s32 lbHostPose;     /* the hosts of the page the lobby's came from, who leave as it comes in (-1 none) */
@@ -2214,6 +2217,7 @@ static void Tb_LobbyOpen(void) {
     sTb->lbRight = LB_BTN;
     sTb->lbFocus = -1;
     sTb->lbRules = 0;
+    sTb->lbPick = 0;
     sTb->lbPicked = -1;
     sTb->lbPop = 0;
     sTb->lbChat = 0;
@@ -2619,6 +2623,7 @@ static s32 Lb_StartAct(void) {
     return 0;
 }
 
+static void Lb_PickOpen(s32 kind);
 static void Lb_RulesOpen(s32 row) {
     sTb->lbRules = 1;
     sTb->lbCol = 1;
@@ -2709,8 +2714,10 @@ static void Lb_Press(s32 it, s32 own) {
         Tb_LobbyAction(LB_ACT_CHAT);
         break;
     case LBI_MAP:
-        Lb_RulesOpen(own ? 6 : LB_MINE);
-        if (!own) {
+        if (own) {
+            Lb_PickOpen(2);
+        } else {
+            Snd_PlaySe(1, 2);
             Tb_Note("THE LEADER PICKS THE MAP");
         }
         break;
@@ -2718,7 +2725,7 @@ static void Lb_Press(s32 it, s32 own) {
         Lb_RulesOpen(own ? 0 : LB_MINE);
         break;
     case LBI_FIGHTER:
-        Lb_RulesOpen(7);
+        Lb_PickOpen(1);
         break;
     case LBI_START:
         if (Lb_StartAct() == LB_ACT_START && !Tb_LobbyCanStart()) {
@@ -2805,7 +2812,7 @@ static void Lb_Focus(s32 it) {
     f32 x1;
     f32 y1;
 
-    if (sTb->lbFocus != it || sTb->lbRules || sTb->lbPop != 0 || sTb->lbChat) {
+    if (sTb->lbFocus != it || sTb->lbRules || sTb->lbPick || sTb->lbPop != 0 || sTb->lbChat) {
         return;
     }
     Lb_Box(it, &x0, &y0, &x1, &y1);
@@ -3232,6 +3239,265 @@ static s32 Lb_RulesHit(s32 *outside) {
     return -1;
 }
 
+/* ---- (this modded copy, 18 Nov 2026) the lobby's own pickers: CHANGE FIGHTER opens every fighter as a grid of faces
+ * for this player alone, the map card (the leader's) every map as pictures; a pick and the page is back (the user:
+ * "when I click select player only that player sees the character list, picks, back to the lobby; the same with the
+ * map"). The fighter goes to the others as the lobby's places do; the map is the leader's rule. */
+extern int Port_CharaCount(void);
+extern int PortStages_Count(void);
+extern int Port_LobbyFighter(void);
+extern void Port_LobbyFighterSet(int idPlus1);
+extern const char *Port_FighterNameEn(int chara);
+extern const char *Port_StageNameEn(int stage);
+
+static s32 Lb_PickCount(void) {
+    return sTb->lbPick == 1 ? 161 + Port_CharaCount() : 1 + 35 + PortStages_Count();
+}
+
+/* The fighter's id (the disc's 0..160, the added ones from 198), or the stage's (-1 the players choose). */
+static s32 Lb_PickId(s32 i) {
+    if (sTb->lbPick == 1) {
+        return i < 161 ? i : 198 + (i - 161);
+    }
+    return i == 0 ? -1 : i <= 35 ? i - 1 : i;
+}
+
+static s32 Lb_PickCols(void) {
+    return sTb->lbPick == 1 ? 22 : 8;
+}
+
+static f32 Lb_PickCellH(f32 w) {
+    return sTb->lbPick == 1 ? w / 0.857f : w * 0.857f * 0.5625f + 15.0f;
+}
+
+#define LB_PICK_TOP 118.0f  /* (mockup pixels) the grid's top */
+#define LB_PICK_FOOT 600.0f /* and the room it has down to */
+
+/* Cell i's box (its row shifted by the rows scrolled away); 0 when it is not in the window. */
+static s32 Lb_PickBox(s32 i, f32 *x0, f32 *y0, f32 *x1, f32 *y1) {
+    s32 cols = Lb_PickCols();
+    f32 left = Lb_X(70.0f);
+    f32 w = (Lb_X(1210.0f) - left) / (f32)cols;
+    f32 h = Lb_PickCellH(w);
+    s32 row = i / cols - sTb->lbPickTop;
+
+    *x0 = left + w * (f32)(i % cols) + 1.5f;
+    *x1 = *x0 + w - 3.0f;
+    *y0 = Lb_Y(LB_PICK_TOP) + h * (f32)row + 1.5f;
+    *y1 = *y0 + h - 3.0f;
+    return row >= 0 && *y1 <= Lb_Y(LB_PICK_FOOT);
+}
+
+static s32 Lb_PickRows(void) {
+    s32 cols = Lb_PickCols();
+    f32 w = (Lb_X(1210.0f) - Lb_X(70.0f)) / (f32)cols;
+    s32 rows = (s32)((Lb_Y(LB_PICK_FOOT) - Lb_Y(LB_PICK_TOP)) / Lb_PickCellH(w));
+
+    return rows < 1 ? 1 : rows;
+}
+
+static void Lb_PickOpen(s32 kind) {
+    PortLobbyView *v = &sTbLv;
+    s32 n;
+    s32 i;
+
+    sTb->lbPick = kind;
+    sTb->lbPickTop = 0;
+    sTb->lbPickCur = 0;
+    n = Lb_PickCount();
+    for (i = 0; i < n; i++) { /* (on what is chosen now) */
+        if ((kind == 1 && Lb_PickId(i) == Port_LobbyFighter() - 1) || (kind == 2 && Lb_PickId(i) == v->stage)) {
+            sTb->lbPickCur = i;
+        }
+    }
+    Snd_PlaySe(1, 1);
+}
+
+/* The pointer in the page's units, 0 off the picture. */
+static s32 Lb_Pointer(f32 *x, f32 *y) {
+    s32 px = Port_MenuPointerX();
+    s32 py = Port_MenuPointerY();
+    f32 ax = Ps_X(0.0f);
+    f32 bx = Ps_X(512.0f);
+    f32 ay = Ps_Y(0.0f);
+    f32 by = Ps_Y(448.0f);
+
+    if (px < 0 || bx - ax < 1.0f || by - ay < 1.0f) {
+        return 0;
+    }
+    *x = ((f32)px - ax) * 512.0f / (bx - ax);
+    *y = ((f32)py - ay) * 448.0f / (by - ay);
+    return 1;
+}
+
+static void Lb_PickChoose(s32 i) {
+    s32 id = Lb_PickId(i);
+
+    if (sTb->lbPick == 1) {
+        Port_LobbyFighterSet(id + 1);
+        Tb_Note("YOUR FIGHTER IS CHANGED");
+    } else if (sTbLv.owner) {
+        Port_LobbyDo(LOBBY_RULE, LOBBY_RULE_STAGE, 1000 + id + 1); /* (net_lobby.c: that stage at once) */
+        Tb_Note(id < 0 ? "THE PLAYERS CHOOSE THE MAP" : "MAP CHANGED");
+    }
+    Snd_PlaySe(1, 1);
+    sTb->lbPick = 0;
+}
+
+static void Lb_PickUpdate(s32 live) {
+    Pad *pad = &gPad[0];
+    s32 n = Lb_PickCount();
+    s32 cols = Lb_PickCols();
+    s32 cur = sTb->lbPickCur;
+    s32 ev = Port_MenuPointerPoll();
+    s32 hit = -1;
+    s32 rows = Lb_PickRows();
+    s32 i;
+    f32 mx;
+    f32 my;
+
+    Ps_Prompt(0, "Choose");
+    Ps_Prompt(2, "Back");
+    if (!live) {
+        return;
+    }
+    if (sTbLv.phase != 0 || (sTb->lbPick == 2 && !sTbLv.owner)) { /* (a match began; or no longer the leader) */
+        sTb->lbPick = 0;
+        return;
+    }
+    if (Lb_Pointer(&mx, &my)) {
+        for (i = 0; i < n; i++) {
+            f32 x0;
+            f32 y0;
+            f32 x1;
+            f32 y1;
+
+            if (Lb_PickBox(i, &x0, &y0, &x1, &y1) && mx >= x0 && mx <= x1 && my >= y0 && my <= y1) {
+                hit = i;
+            }
+        }
+    }
+    if ((ev & 1) && hit >= 0) {
+        cur = hit;
+    }
+    if (pad->gameRepeat & (PADG_RIGHT | PADG_RIGHT2)) {
+        cur = (cur + 1) % n;
+        Snd_PlaySe(1, 0);
+    } else if (pad->gameRepeat & (PADG_LEFT | PADG_LEFT2)) {
+        cur = (cur + n - 1) % n;
+        Snd_PlaySe(1, 0);
+    } else if (pad->gameRepeat & (PADG_DOWN | PADG_DOWN2)) {
+        cur = cur + cols < n ? cur + cols : cur % cols;
+        Snd_PlaySe(1, 0);
+    } else if (pad->gameRepeat & (PADG_UP | PADG_UP2)) {
+        cur = cur - cols >= 0 ? cur - cols : ((n - 1) / cols) * cols + cur % cols < n ? ((n - 1) / cols) * cols + cur % cols : cur;
+        Snd_PlaySe(1, 0);
+    }
+    sTb->lbPickCur = cur;
+    if (cur / cols < sTb->lbPickTop) { /* (the cursor kept in the window) */
+        sTb->lbPickTop = cur / cols;
+    } else if (cur / cols >= sTb->lbPickTop + rows) {
+        sTb->lbPickTop = cur / cols - rows + 1;
+    }
+    if ((ev & 2) && hit >= 0) {
+        Lb_PickChoose(hit);
+    } else if (pad->gamePressed & PADG_CROSS) {
+        Lb_PickChoose(cur);
+    } else if ((pad->gamePressed & (PADG_TRIANGLE | PADG_CIRCLE)) || (ev & 4)) {
+        Snd_PlaySe(1, 2);
+        sTb->lbPick = 0;
+    }
+}
+
+static void Lb_PickDraw(void) {
+    PortLobbyView *v = &sTbLv;
+    s32 n = Lb_PickCount();
+    s32 i;
+    f32 l = Ps_Left();
+    u32 dim = Ps_Rgba(0, 0, 0, 0x50);
+
+    Ps_Quad(l, 0.0f, 512.0f - l, 0.0f, l, 448.0f, 512.0f - l, 448.0f, dim, dim, dim, dim);
+    Ps_Panel(TBO_KIT_WINDOW, Lb_X(40.0f), Lb_Y(50.0f), Lb_X(1240.0f), Lb_Y(690.0f), 0x80);
+    for (i = 0; i < n; i++) {
+        f32 x0;
+        f32 y0;
+        f32 x1;
+        f32 y1;
+        s32 id = Lb_PickId(i);
+        s32 chosen = sTb->lbPick == 1 ? id == Port_LobbyFighter() - 1 : id == v->stage;
+
+        if (!Lb_PickBox(i, &x0, &y0, &x1, &y1)) {
+            continue;
+        }
+        if (i == sTb->lbPickCur) {
+            Ps_Pill(TBO_KIT_SEL, x0 - 2.0f, y0 - 2.0f, x1 + 2.0f, y1 + 2.0f, 0x80);
+        } else if (chosen) {
+            Ps_Pill(TBO_KIT_GOLD, x0 - 1.0f, y0 - 1.0f, x1 + 1.0f, y1 + 1.0f, 0x80);
+        }
+        if (sTb->lbPick == 1) {
+            Ps_Sprite(TBO_FACE_BASE + id, x0 + 1.0f, y0 + 1.0f, x1 - 1.0f, y1 - 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+        } else if (id >= 0) {
+            Ps_Sprite(TBO_STAGE_BASE + id, x0 + 1.0f, y0 + 1.0f, x1 - 1.0f, y1 - 15.0f, 0.0f, 0.0f, 1.0f, 1.0f, PS_PLAIN, 0x80);
+        } else {
+            Ps_Pill(TBO_KIT_BAR, x0 + 1.0f, y0 + 1.0f, x1 - 1.0f, y1 - 15.0f, 0x80);
+        }
+    }
+}
+
+static void Lb_PickDrawText(void) {
+    static char line[96];
+    PortLobbyView *v = &sTbLv;
+    s32 n = Lb_PickCount();
+    s32 id = Lb_PickId(sTb->lbPickCur);
+    const char *nm = 0;
+    s32 i;
+
+    Ps_Text(Lb_X(70.0f), Ps_TextTop(Lb_Y(84.0f), 0.7f), sTb->lbPick == 1 ? "CHOOSE YOUR FIGHTER" : "CHOOSE THE MAP", 0.7f, 0.0f, 1);
+    Ps_Align(2);
+    Ps_Text(Lb_X(1210.0f), Ps_TextTop(Lb_Y(84.0f), 0.42f), sTb->lbPick == 1 ? "ONLY YOU SEE THIS LIST" : "THE LEADER'S CHOICE", 0.42f, 0.0f, 3);
+    Ps_Align(0);
+    if (sTb->lbPick == 2) { /* each map's name under its picture */
+        for (i = 0; i < n; i++) {
+            f32 x0;
+            f32 y0;
+            f32 x1;
+            f32 y1;
+            s32 sid = Lb_PickId(i);
+            const char *sn = 0;
+
+            if (!Lb_PickBox(i, &x0, &y0, &x1, &y1)) {
+                continue;
+            }
+            if (sid >= 0) {
+                sn = Port_StageNameEn(sid);
+            }
+            if (sn != NULL) { /* (not `?:` between a name and a literal: the 32-bit pointers) */
+                Ps_Copy(line, (char *)sn, 96);
+            } else {
+                Ps_Copy(line, sid < 0 ? "PLAYERS CHOOSE" : "STAGE", 96);
+            }
+            Ps_Align(1);
+            Ps_Text((x0 + x1) * 0.5f, Ps_TextTop(y1 - 7.0f, 0.3f), line, 0.3f, x1 - x0 - 2.0f, i == sTb->lbPickCur ? 1 : 0);
+            Ps_Align(0);
+        }
+    }
+    /* the one under the cursor, large */
+    if (sTb->lbPick == 1) {
+        nm = Port_FighterNameEn(id);
+    } else if (id >= 0) {
+        nm = Port_StageNameEn(id);
+    }
+    if (nm != NULL) {
+        Ps_Copy(line, (char *)nm, 96);
+    } else {
+        Ps_Copy(line, sTb->lbPick == 1 ? "FIGHTER" : "PLAYERS CHOOSE THE MAP", 96);
+    }
+    Ps_Align(1);
+    Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(628.0f), 0.8f), line, 0.8f, Lb_X(1100.0f) - Lb_X(180.0f), 1);
+    Ps_Text(Lb_X(640.0f), Ps_TextTop(Lb_Y(668.0f), 0.36f), "CROSS OR CLICK: CHOOSE      TRIANGLE OR RIGHT CLICK: BACK", 0.36f, 0.0f, 3);
+    Ps_Align(0);
+}
+
 static s32 Tb_LobbyPopCount(void) {
     if (sTb->lbPop != LB_POP_MEMBER) {
         return 2;
@@ -3455,6 +3721,10 @@ static void Tb_LobbyUpdate(s32 live) {
         } else if (live) {
             Tb_LobbyPopUpdate();
         }
+        return;
+    }
+    if (sTb->lbPick) { /* (this modded copy) a picker over the page: the fighters, the maps */
+        Lb_PickUpdate(live);
         return;
     }
     if (!sTb->lbRules) { /* (this modded copy) the page as the mockup: its own buttons, the controller and the mouse */
@@ -3692,6 +3962,11 @@ static void Tb_DrawLobby(void) {
         return;
     }
     Lb_Draw(); /* (this modded copy) the page as the mockup */
+    if (sTb->lbPick) {
+        Lb_PickDraw();
+        Tb_LobbyHostsOut();
+        return;
+    }
     if (!sTb->lbRules) {
         Tb_LobbyHostsOut();
         return;
@@ -3769,6 +4044,10 @@ static void Tb_DrawLobbyText(void) {
         return; /* (Tb_DrawLobbyWin) */
     }
     Lb_DrawText(); /* (this modded copy) the page as the mockup; the rest below is the rules window's */
+    if (sTb->lbPick) {
+        Lb_PickDrawText();
+        return;
+    }
     if (!sTb->lbRules) {
         return;
     }

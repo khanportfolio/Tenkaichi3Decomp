@@ -1633,6 +1633,13 @@ static void owner_do(int what, int a, int b) {
                 }
                 /* (fewer: who sat in the places that are no longer the players' is a spectator there now) */
                 sL.entrants = (sL.entrants - 2 + b + (TOUR - 1)) % (TOUR - 1) + 2;
+            } else if (a == LOBBY_RULE_STAGE && b >= 1000) { /* (this modded copy) the map picker: that stage at once,
+                                                                 b = 1000 + its id + 1 (1000: the players choose) */
+                extern int gPortExtraStageCount;
+                int s1 = b - 1000;
+                if (s1 == 0 || (s1 >= 1 && s1 <= 35) || (s1 >= 37 && s1 <= 36 + gPortExtraStageCount)) {
+                    sL.stage1 = s1;
+                }
             } else if (a == LOBBY_RULE_STAGE) { /* random, the disc's 35 stages, then the added ones (ids 36..) */
                 extern int gPortExtraStageCount;
                 int n = 1 + 35 + gPortExtraStageCount, cur = sL.stage1 == 0 ? 0 : sL.stage1 <= 35 ? sL.stage1 : sL.stage1 - 1;
