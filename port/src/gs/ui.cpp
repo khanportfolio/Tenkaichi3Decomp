@@ -1264,6 +1264,33 @@ int Ui_Event(const SDL_Event *ev) {
         ImGui_ImplSDL3_ProcessEvent(ev);
         return 0;
     }
+    // 18 Nov 2026 (the user: "Esc not working, and the x in the right corner not working"): the Friends window (the
+    // lobby's +INVITE, ONLINE FRIENDS, RANKING) opens without the settings window, which alone was given the mouse and
+    // the keys: nothing in it could be clicked or typed. While it is open it gets them first; Esc or the
+    // controller's Circle / B closes it; what it does not use goes on to the game.
+    if (!sOpen && !sQuit && !sChat && PortFriends_IsShown()) {
+        ImGuiIO &io = ImGui::GetIO();
+        if ((ev->type == SDL_EVENT_KEY_DOWN && !ev->key.repeat && ev->key.scancode == SDL_SCANCODE_ESCAPE) ||
+            (ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN && ev->gbutton.button == SDL_GAMEPAD_BUTTON_EAST)) {
+            PortFriends_Hide();
+            return 1;
+        }
+        if (ev->type == SDL_EVENT_MOUSE_MOTION) {
+            ImGui_ImplSDL3_ProcessEvent(ev);
+            return 0;
+        }
+        if (ev->type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev->type == SDL_EVENT_MOUSE_BUTTON_UP || ev->type == SDL_EVENT_MOUSE_WHEEL) {
+            ImGui_ImplSDL3_ProcessEvent(ev);
+            return io.WantCaptureMouse ? 1 : 0;
+        }
+        if (ev->type == SDL_EVENT_KEY_DOWN || ev->type == SDL_EVENT_KEY_UP || ev->type == SDL_EVENT_TEXT_INPUT ||
+            ev->type == SDL_EVENT_TEXT_EDITING) {
+            ImGui_ImplSDL3_ProcessEvent(ev);
+            if (io.WantTextInput) { // (a friend code being typed: the letters are the box's, not the lobby's)
+                return 1;
+            }
+        }
+    }
     if (!sOpen && !sQuit && !sChat && PortInput_TboEvent(ev)) { // typed on a keypad of Tenkaichi Budokai Online
         return 1;
     }

@@ -46,6 +46,7 @@ const char *PortFriends_MyCode(void);        /* this player's friend code, NULL 
 void PortFriends_Show(int tab);
 int PortFriends_Shown(int *tab);              /* 1 if it is to be open; *tab the tab asked for, -1 none (taken) */
 void PortFriends_Hide(void);
+int PortFriends_IsShown(void);                /* 1 while the window is open (nothing taken) */
 /* Joining a friend's lobby or an invitation's: the code is kept until the Online menu takes it (port_tbo.c). */
 void PortFriends_JoinSet(const char *lobbyCode);
 int PortFriends_JoinTake(char *out);          /* 1 and the code (7 bytes) if one waits */

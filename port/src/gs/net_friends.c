@@ -443,6 +443,10 @@ void PortFriends_Hide(void) {
     sShow = 0;
 }
 
+int PortFriends_IsShown(void) {
+    return sShow;
+}
+
 void PortFriends_JoinSet(const char *lobbyCode) {
     SDL_strlcpy(sJoin, lobbyCode, sizeof(sJoin));
 }
