@@ -443,6 +443,7 @@ static void MmNew_DrawList(void) {
     Ps_SetShift(0.0f);
 
     Ps_Stand(MM2_CLOUD, MmNew_X(1190.0f), MmNew_Y(112.0f), MmNew_Y(120.0f), a);
+    MmNew_DrawButton(a);
     Ps_Stand(MM2_TITLE, MmNew_X(262.0f), MmNew_Y(146.0f), MmNew_Y(146.0f), a);
     MmNew_Pic(MM2_UP, 277.0f, MMNEW_TOP - 12.0f, 24.0f, a);
 
@@ -484,6 +485,195 @@ static void MmNew_DrawList(void) {
         Ps_TextEx(MmNew_X(x0 + 90.0f), Ps_TextTop(MmNew_Y(y + h * 0.5f), scale), (char *)kMmName[item], scale,
                   MmNew_X(x1 - (i == sel ? 70.0f : 30.0f)) - MmNew_X(x0 + 90.0f), top, bot, line);
         y += h + MMNEW_GAP;
+    }
+}
+
+/*
+ * The credits (19 Nov 2026, the user: "credit to the game owner, where I took things from the BT4 game, and mod by
+ * A. Khan; small, a button top right"): a small CREDITS button under the gold cloud, pressed by a click, the C key
+ * or SELECT; it rolls the names up over the menu like a film's end, "Mod by A. Khan" stays in the middle at the end;
+ * any button, a click or Esc closes it.
+ */
+#define MMNEW_KEY_C 6 /* SDL_SCANCODE_C */
+static const struct {
+    s32 kind; /* 0 heading, 1 a name, 2 a gap, 3 the last big line, 4 a small line */
+    const char *text;
+} kMmCredits[] = {
+    {0, "CREDITS"},
+    {2, ""},
+    {0, "Original Game"},
+    {1, "Dragon Ball Z: Budokai Tenkaichi 3"},
+    {4, "Developed by Spike"},
+    {4, "Published by Namco Bandai Games and Atari (2007)"},
+    {2, ""},
+    {0, "Dragon Ball"},
+    {1, "Created by Akira Toriyama"},
+    {4, "Bird Studio / Shueisha, Toei Animation"},
+    {2, ""},
+    {0, "PC Version"},
+    {1, "Tenkaichi3Decomp"},
+    {4, "The decompilation and PC port project and its contributors"},
+    {2, ""},
+    {0, "Extra Fighters and Moves"},
+    {1, "Dragon Ball Z: Budokai Tenkaichi 4 (fan mod)"},
+    {4, "Team BT4: fighters, moves and pictures"},
+    {2, ""},
+    {0, "3D Models"},
+    {1, "RaulV2 (CC-BY 4.0)"},
+    {1, "free122 (CC-BY 4.0)"},
+    {1, "Kinnikuchu"},
+    {2, ""},
+    {0, "Menus, Maps and Videos"},
+    {4, "Designs made with AI tools (ChatGPT, Google Flow)"},
+    {2, ""},
+    {2, ""},
+    {4, "Fan-made modification for personal use. Not affiliated with the owners above."},
+    {2, ""},
+    {2, ""},
+    {3, "Mod by A. Khan"},
+};
+#define MMNEW_CREDIT_N ((s32)(sizeof(kMmCredits) / sizeof(kMmCredits[0])))
+static s32 sMmCredits;    /* frames the credits are open, 0 closed */
+static s32 sMmBtnHover;   /* the pointer is on the button */
+static s32 sMmKeyC;       /* C was held last frame */
+
+/* The button's box, the design's pixels. */
+#define MMNEW_BTN_X0 1104.0f
+#define MMNEW_BTN_Y0 118.0f
+#define MMNEW_BTN_X1 1256.0f
+#define MMNEW_BTN_Y1 154.0f
+
+static f32 MmNew_LineH(s32 kind) {
+    return kind == 0 ? 50.0f : kind == 1 ? 38.0f : kind == 3 ? 80.0f : kind == 4 ? 30.0f : 30.0f;
+}
+
+/* The pointer over the button (the pointer's game pixels to the page's units, as the lobby's). */
+static s32 MmNew_OnButton(void) {
+    extern int Port_MenuPointerX(void);
+    extern int Port_MenuPointerY(void);
+    s32 px = Port_MenuPointerX();
+    s32 py = Port_MenuPointerY();
+    f32 ax;
+    f32 bx;
+    f32 ay;
+    f32 by;
+    f32 x;
+    f32 y;
+
+    Ps_PageSet();
+    ax = Ps_X(0.0f);
+    bx = Ps_X(512.0f);
+    ay = Ps_Y(0.0f);
+    by = Ps_Y(448.0f);
+    if (px < 0 || bx - ax < 1.0f || by - ay < 1.0f) {
+        return 0;
+    }
+    x = ((f32)px - ax) * 512.0f / (bx - ax);
+    y = ((f32)py - ay) * 448.0f / (by - ay);
+    return x >= MmNew_X(MMNEW_BTN_X0) && x <= MmNew_X(MMNEW_BTN_X1) && y >= MmNew_Y(MMNEW_BTN_Y0) &&
+           y <= MmNew_Y(MMNEW_BTN_Y1);
+}
+
+/* Per frame, before the menu's own buttons: non-zero when the credits took this frame's input. */
+static s32 MmNew_CreditsInput(void) {
+    extern int Port_MenuPointerPoll(void);
+    extern int Port_KeyScanHeld(int sc);
+    s32 ev = Port_MenuPointerPoll();
+    s32 c = Port_KeyScanHeld(MMNEW_KEY_C);
+    s32 cDown = c && !sMmKeyC;
+
+    sMmKeyC = c;
+    if (sMmCredits > 0) {
+        if (sMmCredits > 10 && ((gPad[0].gamePressed & (PADG_CROSS | PADG_CIRCLE | PADG_TRIANGLE | PADG_START | PADG_SELECT)) ||
+                                (ev & 6) || cDown)) {
+            sMmCredits = 0;
+            Snd_PlaySe(1, 2);
+        }
+        return 1;
+    }
+    sMmBtnHover = MmNew_OnButton();
+    if (((ev & 2) && sMmBtnHover) || cDown || (gPad[0].gamePressed & PADG_SELECT)) {
+        sMmCredits = 1;
+        Snd_PlaySe(1, 1);
+        return 1;
+    }
+    return 0;
+}
+
+static void MmNew_DrawButton(s32 a) {
+    u32 top = sMmBtnHover ? Ps_Rgba(0xFF, 0xFF, 0xFF, a) : Ps_Rgba(0xFF, 0xE6, 0x80, a);
+    u32 bot = sMmBtnHover ? Ps_Rgba(0xFF, 0xE6, 0x80, a) : Ps_Rgba(0xFF, 0x9C, 0x1E, a);
+
+    Ps_Pill(MM2_FRAME, MmNew_X(MMNEW_BTN_X0), MmNew_Y(MMNEW_BTN_Y0), MmNew_X(MMNEW_BTN_X1), MmNew_Y(MMNEW_BTN_Y1), a);
+    Ps_Align(1);
+    Ps_TextEx(MmNew_X((MMNEW_BTN_X0 + MMNEW_BTN_X1) * 0.5f), Ps_TextTop(MmNew_Y((MMNEW_BTN_Y0 + MMNEW_BTN_Y1) * 0.5f), 0.5f),
+              "CREDITS", 0.5f, MmNew_X(MMNEW_BTN_X1 - 30.0f) - MmNew_X(MMNEW_BTN_X0 + 30.0f), top, bot,
+              Ps_Rgba(0x3A, 0x16, 0x00, a));
+    Ps_Align(0);
+}
+
+/* The rolling names over a dark veil. */
+static void MmNew_DrawCredits(void) {
+    f32 total = 0.0f;
+    f32 y;
+    f32 cy;
+    f32 fade;
+    f32 roll;
+    s32 i;
+    s32 k;
+    s32 a;
+    f32 scale;
+
+    if (sMmCredits <= 0) {
+        return;
+    }
+    sMmCredits++;
+    for (i = 0; i < MMNEW_CREDIT_N; i++) {
+        total += MmNew_LineH(kMmCredits[i].kind);
+    }
+    fade = sMmCredits * 6 > 0x70 ? (f32)0x70 : (f32)(sMmCredits * 6);
+    Ps_Rect(Ps_Left(), 0.0f, 512.0f - Ps_Left(), 448.0f, Ps_Rgba(0, 0, 0, (s32)fade), Ps_Rgba(0, 0, 0, (s32)fade));
+    /* the list starts under the window's foot and rolls up until its last line is in the middle */
+    roll = sMmCredits * 1.2f;
+    if (roll > 720.0f + total - 360.0f - MmNew_LineH(3) * 0.5f) {
+        roll = 720.0f + total - 360.0f - MmNew_LineH(3) * 0.5f;
+    }
+    y = 720.0f - roll;
+    Ps_Align(1);
+    for (i = 0; i < MMNEW_CREDIT_N; i++) {
+        k = kMmCredits[i].kind;
+        cy = y + MmNew_LineH(k) * 0.5f;
+        y += MmNew_LineH(k);
+        if (k == 2 || cy < -40.0f || cy > 760.0f) {
+            continue;
+        }
+        /* fading in at the foot and out at the top */
+        a = 0x80;
+        if (cy < 110.0f) {
+            a = cy <= 30.0f ? 0 : (s32)((cy - 30.0f) / 80.0f * 128.0f);
+        } else if (cy > 640.0f) {
+            a = cy >= 710.0f ? 0 : (s32)((710.0f - cy) / 70.0f * 128.0f);
+        }
+        if (a <= 0) {
+            continue;
+        }
+        scale = k == 0 ? 0.78f : k == 1 ? 0.62f : k == 3 ? 1.35f : 0.46f;
+        if (k == 0 || k == 3) {
+            Ps_TextExOuter(MmNew_X(640.0f), Ps_TextTop(MmNew_Y(cy), scale), (char *)kMmCredits[i].text, scale,
+                           MmNew_X(1200.0f) - MmNew_X(80.0f), Ps_Rgba(0xFF, 0xF0, 0x90, a), Ps_Rgba(0xFF, 0x8C, 0x10, a),
+                           Ps_Rgba(0x3A, 0x16, 0x00, a), Ps_Rgba(0x00, 0x00, 0x00, a / 2), 2.0f);
+        } else {
+            Ps_TextEx(MmNew_X(640.0f), Ps_TextTop(MmNew_Y(cy), scale), (char *)kMmCredits[i].text, scale,
+                      MmNew_X(1200.0f) - MmNew_X(80.0f), Ps_Rgba(0xFF, 0xFF, 0xFF, a),
+                      k == 4 ? Ps_Rgba(0xC8, 0xD4, 0xEC, a) : Ps_Rgba(0xDC, 0xE6, 0xFF, a), Ps_Rgba(0x06, 0x10, 0x26, a));
+        }
+    }
+    Ps_Align(0);
+    if (roll >= 720.0f + total - 360.0f - MmNew_LineH(3) * 0.5f) { /* at the end: how to leave */
+        Ps_Align(1);
+        Ps_TextEx(MmNew_X(640.0f), Ps_TextTop(MmNew_Y(660.0f), 0.42f), "Press any button", 0.42f, 0.0f,
+                  Ps_Rgba(0xFF, 0xFF, 0xFF, 0x60), Ps_Rgba(0xC8, 0xD4, 0xEC, 0x60), Ps_Rgba(0x06, 0x10, 0x26, 0x60));
+        Ps_Align(0);
     }
 }
 
@@ -681,16 +871,16 @@ void MainMenu_Draw(void) {
         Flash_Draw(&gMainMenu->flash[i]);
     }
 #ifdef PORT
-    if (MmNew_On()) {
-        MmNew_DrawList();
-    } else {
+    if (!MmNew_On()) {
         IconWin_Draw();
     }
     MsgWin_Draw(0, 0, gMainMenu->voiceLine);
-    if (MmNew_On()) {
-        MmNew_DrawKeys();
-    }
     Port_MenuPage(0);
+    if (MmNew_On()) { /* (after the page: the menu page moves what it draws outside its movie's clips) */
+        MmNew_DrawList();
+        MmNew_DrawKeys();
+        MmNew_DrawCredits();
+    }
 #else
     IconWin_Draw();
     MsgWin_Draw(0, 0, gMainMenu->voiceLine);
@@ -769,6 +959,11 @@ void MainMenu_Input(s32 *result) {
         }
         gMainMenu->flags |= MAINMENU_STARTED;
     }
+#ifdef PORT
+    if (MmNew_On() && MmNew_CreditsInput()) { /* (the credits: their button, C, SELECT; open, they take the buttons) */
+        return;
+    }
+#endif
     if (gPad[0].gameRepeat & 8) {
         MainMenu_PlateGoto(0, "fl_off_start");
         gMainMenu->iconTimer = 0;

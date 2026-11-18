@@ -190,6 +190,13 @@ int PortInput_Hotkey(const SDL_Event *ev) {
 }
 /* The settings window closed, or its exit question was answered, with a controller button: that press is not the game's. */
 void PortInput_Swallow(void) { sSwallow = 2; }
+/* (19 Nov 2026) Whether a key (an SDL scancode) is held now: the menus' own shortcuts (the main menu's C, its
+   credits: src/menu/menu_a.c). */
+int Port_KeyScanHeld(int sc) {
+    const bool *ks = SDL_GetKeyboardState(NULL);
+
+    return ks != NULL && sc > 0 && sc < SDL_SCANCODE_COUNT && ks[sc];
+}
 void PortInput_SwallowKeys(void) { sKeySwallow = 1; }
 
 /* Tenkaichi Budokai Online's keypads (src/menu/port_tbo.c): while one takes text (gPortTboTyping), what is typed
