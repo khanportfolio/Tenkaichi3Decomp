@@ -1122,7 +1122,14 @@ int Port_PadRead(int socket, unsigned char *data) {
     }
     /* (the settings window is worked with the controller too while it is open: nothing of it for the game) */
     /* (19 Nov 2026) and while the Friends window is open the controller is the window's (ui.cpp friends_draw) */
-    g = gPortInputCapture || gPortOverlayOpen || sSwallow || PortFriends_IsShown() ? NULL : pad_of(socket);
+    /* 19 Nov 2026: a test copy (BT3_PAD or BT3_LOBBY_DO set by the background tests) takes no real keys, controllers
+       or mouse: the player's own presses, meant for their own game or another window, started a hidden test lobby's
+       match. Its input is the script's (script_buttons) and the lobby's commands only. */
+    static int sTestCopy = -1;
+    if (sTestCopy < 0) {
+        sTestCopy = getenv("BT3_PAD") != NULL || getenv("BT3_LOBBY_DO") != NULL || getenv("BT3_LOBBY") != NULL;
+    }
+    g = sTestCopy || gPortInputCapture || gPortOverlayOpen || sSwallow || PortFriends_IsShown() ? NULL : pad_of(socket);
     if (g != NULL) {
         for (a = 0; a < PORT_PAD_BUTTONS; a++) {
             int src = sPadBtn[socket][a];
@@ -1147,7 +1154,7 @@ int Port_PadRead(int socket, unsigned char *data) {
     }
     /* the settings window takes the keyboard while it is open, and the online chat while a line is typed (the
        controller still plays then) */
-    if (!gPortOverlayOpen && !gPortChatTyping && !sKeySwallow) {
+    if (!sTestCopy && !gPortOverlayOpen && !gPortChatTyping && !sKeySwallow) {
         const bool *ks = SDL_GetKeyboardState(NULL);
         const int *k = sKeys[socket];
         /* 18 Nov 2026 (the user: "sometimes K works as Enter, sometimes Enter does: make only Enter the Enter"): most
