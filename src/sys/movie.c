@@ -342,8 +342,12 @@ void Movie_Run(void) {
 #ifdef PORT
         } else if (noSkip > 0) {
             noSkip--;
-#endif
+        } else if (gPad[0].gamePressed & (MOVIE_SKIP_BUTTON | PADG_CROSS)) {
+            /* (19 Nov 2026, the user: "I cannot skip the intro with Enter any more": in the menus the keyboard's Enter
+               is Cross now (gs_input.c menu_enter_ok), so Cross skips a movie as START does) */
+#else
         } else if (gPad[0].gamePressed & MOVIE_SKIP_BUTTON) {
+#endif
 #ifdef PORT
             sMovieSkipped = 1;
 #endif
