@@ -71,7 +71,7 @@ static int sPipeCount;
 
 /* textures created this frame, to upload in the copy pass */
 #define MAX_PENDING 4096
-static struct { SDL_GPUTexture *tex; uint32_t w, h; uint32_t *px; uint32_t bytes, level; /* bytes 0: w * h * 4 */ } sPending[MAX_PENDING];
+static struct { SDL_GPUTexture *tex; uint32_t w, h; uint32_t *px; uint32_t bytes, level; int cycle; /* bytes 0: w * h * 4 */ } sPending[MAX_PENDING];
 static int sPendingCount;
 
 static uint64_t gpu_now(void) { return SDL_GetTicksNS(); }
@@ -328,6 +328,10 @@ static int tex_upload(GsTex handle, int level, uint32_t w, uint32_t h, int forma
     sPending[sPendingCount].px = (uint32_t *)px;
     sPending[sPendingCount].bytes = bytes;
     sPending[sPendingCount].level = (uint32_t)level;
+    {
+        extern int gGsUploadCycle; /* gs_draw.c anim_step: a video's texture filled again */
+        sPending[sPendingCount].cycle = gGsUploadCycle;
+    }
     {
         extern uint64_t gDrawUpBytes; /* BT3_DRAW_LOG */
         gDrawUpBytes += bytes;
@@ -767,6 +771,7 @@ static int vk_init(void) {
         sWhite = SDL_CreateGPUTexture(sDev, &ci);
         sPending[sPendingCount].tex = sWhite;
         sPending[sPendingCount].bytes = sPending[sPendingCount].level = 0;
+        sPending[sPendingCount].cycle = 0;
         sPending[sPendingCount].w = sPending[sPendingCount].h = 1;
         sPending[sPendingCount].px = malloc(4);
         memcpy(sPending[sPendingCount].px, &white, 4);
@@ -1275,7 +1280,7 @@ static void vk_frame_end(void) {
                 dst.w = sPending[i].w;
                 dst.h = sPending[i].h;
                 dst.d = 1;
-                SDL_UploadToGPUTexture(copy, &src, &dst, false);
+                SDL_UploadToGPUTexture(copy, &src, &dst, sPending[i].cycle != 0);
                 at += (bytes + 15) & ~15u;
             }
             free(sPending[i].px);

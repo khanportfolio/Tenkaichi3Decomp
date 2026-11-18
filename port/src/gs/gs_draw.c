@@ -178,6 +178,7 @@ unsigned gsSkipped;
 unsigned gGpuNewTex, gGpuNewTexPixels, gGpuNewPipes; /* created since the front end last cleared them (slow-frame report) */
 unsigned gGpuTexReplaced; /* textures taken from a texture pack so far */
 uint64_t gGpuTexNs, gGpuPipeNs, gGpuEndNs; /* time spent decoding textures, creating pipelines, in GsGpu_FrameEnd */
+int gGsUploadCycle; /* (anim_step) the next texUpload refills a texture that may still be in use: the back end cycles it */
 /* The same for the picture being drawn only, where it is drawn (the render thread's, or the game's): BT3_DRAW_LOG
    (gs_gpu.c, draw_log). From the start of its list (GsGpu_ListStart). */
 uint64_t gDrawStartNs, gDrawTexNs, gDrawPipeNs, gDrawUpBytes, gDrawImgNs, gDrawLookNs, gDrawVuNs, gDrawXferNs;
@@ -277,6 +278,7 @@ typedef struct Tex {
     uint32_t packAlpha;      /* and the amax it will have */
     int anim;                /* an animated replacement's pack id (anim_step), or -1 */
     uint32_t animFrame;      /* and the frame it shows */
+    int animOwn;             /* the texture is anim_step's own (one level): filled again for the next frame */
     int backdrop;            /* its replacement is a menu's backdrop video (gs_texpack.c backdrop; GsGpu_Draw) */
     int backdropId;          /* and that replacement's pack id (its sound: TexPack_BackdropAudio) */
     float avg[3];            /* its average colour, weighted by alpha, 0..1 (an energy light's colour is in its texture) */
@@ -547,6 +549,92 @@ static GsTex tbo_text_texture(uint32_t id) {
     return tex;
 }
 
+/* 18 Nov 2026 (the user: sudden drops to 4-5 fps): the online screens' pictures were read and unpacked from their
+   PNG files inside a frame, 170 ms for the lobby's background and buttons, longer for a page of faces or maps. They
+   are read on a thread of their own now (png_async); until one is in, it is drawn as nothing (clear_tex). */
+#define PNG_IDS (TBO_EXTRA_BASE + TBO_EXTRA_COUNT)
+static struct { char path[3][300]; SDL_Surface *done; int state; } sPngJob[PNG_IDS]; /* state 0, 1 asked, 2 read */
+static SDL_Mutex *sPngLock;
+static SDL_Condition *sPngWake;
+static int sPngThread = -1; /* -1 not started, 0 none (read in the frame, as before), 1 running */
+
+static int png_worker(void *unused) {
+    (void)unused;
+    for (;;) {
+        int k = -1, i, j;
+        SDL_Surface *png = NULL;
+        SDL_LockMutex(sPngLock);
+        while (k < 0) {
+            for (i = 0; i < PNG_IDS && k < 0; i++) {
+                if (sPngJob[i].state == 1) {
+                    k = i;
+                }
+            }
+            if (k < 0) {
+                SDL_WaitCondition(sPngWake, sPngLock);
+            }
+        }
+        SDL_UnlockMutex(sPngLock);
+        for (j = 0; j < 3 && png == NULL; j++) {
+            if (sPngJob[k].path[j][0] != '\0') {
+                png = SDL_LoadPNG(sPngJob[k].path[j]);
+            }
+        }
+        SDL_LockMutex(sPngLock);
+        sPngJob[k].done = png;
+        sPngJob[k].state = 2;
+        SDL_UnlockMutex(sPngLock);
+    }
+    return 0;
+}
+
+/* Picture `id` from the first of the paths that reads: the PNG once it is in (the caller's; NULL: none of them), or
+   NULL with *wait set while it is being read. */
+static SDL_Surface *png_async(uint32_t id, const char *p0, const char *p1, const char *p2, int *wait) {
+    SDL_Surface *s = NULL;
+    *wait = 0;
+    if (sPngThread < 0) {
+        sPngLock = SDL_CreateMutex();
+        sPngWake = SDL_CreateCondition();
+        sPngThread = sPngLock != NULL && sPngWake != NULL && SDL_CreateThread(png_worker, "bt3-pictures", NULL) != NULL;
+    }
+    if (sPngThread == 0 || id >= PNG_IDS) {
+        s = SDL_LoadPNG(p0);
+        if (s == NULL && p1 != NULL) s = SDL_LoadPNG(p1);
+        if (s == NULL && p2 != NULL) s = SDL_LoadPNG(p2);
+        return s;
+    }
+    SDL_LockMutex(sPngLock);
+    if (sPngJob[id].state == 0) {
+        SDL_strlcpy(sPngJob[id].path[0], p0, sizeof(sPngJob[id].path[0]));
+        SDL_strlcpy(sPngJob[id].path[1], p1 != NULL ? p1 : "", sizeof(sPngJob[id].path[1]));
+        SDL_strlcpy(sPngJob[id].path[2], p2 != NULL ? p2 : "", sizeof(sPngJob[id].path[2]));
+        sPngJob[id].state = 1;
+        SDL_SignalCondition(sPngWake);
+        *wait = 1;
+    } else if (sPngJob[id].state == 1) {
+        *wait = 1;
+    } else {
+        s = sPngJob[id].done;
+        sPngJob[id].done = NULL;
+        sPngJob[id].state = 0;
+    }
+    SDL_UnlockMutex(sPngLock);
+    return s;
+}
+
+/* A clear 1 x 1 picture: what a picture still being read is drawn with. */
+static GsTex clear_tex(void) {
+    static GsTex clear;
+    if (clear == 0 && sBackend->texSlotsLeft() > 0) {
+        uint32_t *px = calloc(1, 4);
+        if (px != NULL) {
+            clear = tbo_upload(px, 1, 1);
+        }
+    }
+    return clear != 0 ? clear : gsWhite;
+}
+
 /* The lobby's own pictures (include/menu/tbo_art.h, TBO_EXTRA_BASE): read from tbo/ui/fighters, tbo/ui/stages and
    tbo/ui/lobby_bg.png the first time, kept; one that is missing is drawn as nothing and not looked for again. */
 static GsTex sExtraTex[TBO_EXTRA_COUNT];
@@ -571,9 +659,10 @@ static GsTex tbo_extra_texture(uint32_t id) {
     }
     base = SDL_GetBasePath();
     snprintf(path, sizeof(path), "%s%s", base != NULL ? base : "", rel);
-    png = SDL_LoadPNG(path);
-    if (png == NULL) {
-        png = SDL_LoadPNG(rel);
+    {
+        int wait;
+        png = png_async(id, path, rel, NULL, &wait);
+        if (wait) return clear_tex(); /* (still being read: nothing this frame) */
     }
     rgba = png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
     if (png != NULL) SDL_DestroySurface(png);
@@ -636,16 +725,15 @@ static GsTex tbo_texture(uint32_t id) {
             snprintf(path, sizeof(path), "EU disc PZS3EU0.AFS selector texture %u", (unsigned)id);
         }
     } else {
+        char rel1[160], rel2[160];
+        int wait;
         base = SDL_GetBasePath();
         snprintf(path, sizeof(path), "%stbo/ui/%s.png", base != NULL ? base : "", kTboNames[id]);
-        png = SDL_LoadPNG(path);
-        if (png == NULL) {
-            snprintf(path, sizeof(path), "tbo/ui/%s.png", kTboNames[id]);
-            png = SDL_LoadPNG(path);
-        }
-        if (png == NULL) { /* a source checkout: the pictures where they are kept (port/tbo/ui) */
-            snprintf(path, sizeof(path), "port/tbo/ui/%s.png", kTboNames[id]);
-            png = SDL_LoadPNG(path);
+        snprintf(rel1, sizeof(rel1), "tbo/ui/%s.png", kTboNames[id]);
+        snprintf(rel2, sizeof(rel2), "port/tbo/ui/%s.png", kTboNames[id]); /* (a source checkout: where they are kept) */
+        png = png_async(id, path, rel1, rel2, &wait);
+        if (wait) {
+            return clear_tex(); /* (still being read: nothing this frame) */
         }
     }
     rgba = png != NULL ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
@@ -769,6 +857,22 @@ static void anim_step(Tex *c) {
     if (f == c->animFrame || sOldHead - sOldTail >= 512 || sBackend->texSlotsLeft() < 1) {
         return;
     }
+    /* 18 Nov 2026 (the user: sudden drops to 4-5 fps in the game and on the home screen): a new texture for every
+       frame of a video (24 a second, on up to 8 tiles of the select's background) was made and thrown away; the
+       driver's making and freeing of them stalled now and then. The texture this made the first time is filled
+       again (gGsUploadCycle: the back end gives it fresh storage if a frame still in flight reads it). */
+    if (c->animOwn && c->tex != 0) {
+        buf = malloc(pack.bytes[0]);
+        if (buf == NULL) {
+            return;
+        }
+        memcpy(buf, pack.data[0] + (size_t)f * pack.bytes[0], pack.bytes[0]);
+        gGsUploadCycle = 1;
+        sBackend->texUpload(c->tex, 0, pack.w, pack.h, pack.format & 3, buf, pack.bytes[0]);
+        gGsUploadCycle = 0;
+        c->animFrame = f;
+        return;
+    }
     tex = sBackend->texCreate(pack.w, pack.h, pack.format & 3, 1);
     if (tex == 0) {
         return;
@@ -783,6 +887,7 @@ static void anim_step(Tex *c) {
     old_retire(c->tex);
     c->tex = tex;
     c->animFrame = f;
+    c->animOwn = 1;
 }
 
 /* A texture made from the original while its replacement was still being read: once the file is in, it is made
@@ -808,6 +913,7 @@ static void pack_arrived(Tex *c) {
     old_retire(c->tex);
     c->anim = pack.frames > 1 ? c->pack : -1;
     c->animFrame = 0;
+    c->animOwn = 0;
     c->tex = tex;
     c->replaced = 1;
     c->rw = pack.w;
@@ -1142,6 +1248,7 @@ static GsTex texture_get(int ctx) {
     t->packAlpha = packMaxAlpha;
     t->anim = animId;
     t->animFrame = 0;
+    t->animOwn = 0;
     t->backdrop = isBackdrop;
     t->backdropId = backdropId;
     memcpy(t->avg, sTexAvg, sizeof(t->avg));
