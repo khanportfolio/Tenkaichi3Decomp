@@ -95,7 +95,40 @@
     X(MM_LOCK, "mm_lock") \
     X(MM_PIP, "mm_pip") \
     X(MM_PIP_OFF, "mm_pip_off") \
-    X(MM_BG_DUSK, "mm_bg_dusk")     /* the character select's mod grid */
+    X(MM_BG_DUSK, "mm_bg_dusk")     /* the character select's mod grid */ \
+    X(MM2_TITLE, "mm2_title")     /* the main menu's own look (src/menu/menu_a.c, 19 Nov 2026) */ \
+    X(MM2_BAR, "mm2_bar") \
+    X(MM2_BAR_SEL, "mm2_bar_sel") \
+    X(MM2_UP, "mm2_up") \
+    X(MM2_DOWN, "mm2_down") \
+    X(MM2_FRAME, "mm2_frame") \
+    X(MM2_CLOUD, "mm2_cloud") \
+    X(MM2_I_SHENRON, "mm2_i_shenron") \
+    X(MM2_I_BOOK, "mm2_i_book") \
+    X(MM2_I_SWORDS, "mm2_i_swords") \
+    X(MM2_I_GLOBE, "mm2_i_globe") \
+    X(MM2_I_VS, "mm2_i_vs") \
+    X(MM2_I_WIFI, "mm2_i_wifi") \
+    X(MM2_I_DATA, "mm2_i_data") \
+    X(MM2_I_GEAR, "mm2_i_gear") \
+    X(MM2_K_ENTER, "mm2_k_enter") \
+    X(MM2_K_ESC, "mm2_k_esc") \
+    X(MM2_K_X, "mm2_k_x") \
+    X(MM2_K_O, "mm2_k_o") \
+    X(MM2_BALL_LIT_1, "mm2_ball_lit_1") \
+    X(MM2_BALL_LIT_2, "mm2_ball_lit_2") \
+    X(MM2_BALL_LIT_3, "mm2_ball_lit_3") \
+    X(MM2_BALL_LIT_4, "mm2_ball_lit_4") \
+    X(MM2_BALL_LIT_5, "mm2_ball_lit_5") \
+    X(MM2_BALL_LIT_6, "mm2_ball_lit_6") \
+    X(MM2_BALL_LIT_7, "mm2_ball_lit_7") \
+    X(MM2_BALL_DIM_1, "mm2_ball_dim_1") \
+    X(MM2_BALL_DIM_2, "mm2_ball_dim_2") \
+    X(MM2_BALL_DIM_3, "mm2_ball_dim_3") \
+    X(MM2_BALL_DIM_4, "mm2_ball_dim_4") \
+    X(MM2_BALL_DIM_5, "mm2_ball_dim_5") \
+    X(MM2_BALL_DIM_6, "mm2_ball_dim_6") \
+    X(MM2_BALL_DIM_7, "mm2_ball_dim_7")
 
 #define TBO_ART_ENUM(id, name) id,
 enum { TBO_ART_LIST(TBO_ART_ENUM) TBO_ART_COUNT };

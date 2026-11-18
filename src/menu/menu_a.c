@@ -344,6 +344,176 @@ void MainMenu_Term(void) {
     }
 }
 
+#ifdef PORT
+/*
+ * PC only (19 Nov 2026, the user's design: Super-Characters/menu-design-19Nov): the main menu's own look. The movie's
+ * plates, arrows, dragon balls and the title window are hidden and the list is drawn with the port's pictures
+ * (port/tbo/ui/mm2_*.png, include/menu/tbo_art.h) over the backdrop: a "MAIN MENU" title with Shenron, a row per
+ * item with its icon and English name (the chosen one gold and larger), arrows, the save's seven balls in a gold
+ * frame, and the keys at the foot. The message window (the item's line) stays the game's. BT3_OLD_MENU=1: the
+ * game's own look.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include "menu/port_screen.h"
+#include "menu/tbo_art.h"
+
+static const char *const kMmName[MAINMENU_ITEM_MAX] = {
+    "Dragon History", "Ultimate Battle", "Dragon World Tour", "Duel", "Dragon Net Battle", "Evolution Z",
+    "Ultimate Training", "Data Center", "Character Reference", "Options", "Shenron", "Tenkaichi Budokai Online",
+    "Mod Manager",
+};
+static const s32 kMmIcon[MAINMENU_ITEM_MAX] = {
+    MM2_I_BOOK, MM2_I_SWORDS, MM2_I_GLOBE, MM2_I_VS, MM2_I_WIFI, MM2_I_GEAR, MM2_I_SWORDS, MM2_I_DATA, MM2_I_BOOK,
+    MM2_I_GEAR, MM2_I_SHENRON, MM2_I_WIFI, MM2_I_GEAR,
+};
+static s32 sMmFrames; /* frames since the screen opened (the pieces fade in) */
+static void *sMmFor;  /* the screen they count for */
+
+static s32 MmNew_On(void) {
+    static s32 on = -1;
+
+    if (on < 0) {
+        char *e = getenv("BT3_OLD_MENU");
+        on = !(e != NULL && e[0] == '1');
+    }
+    return on;
+}
+
+/* The design's place (1280 x 720 over the whole window) in the page's units. */
+static f32 MmNew_X(f32 px) {
+    f32 l = Ps_Left();
+
+    return l + px * (512.0f - 2.0f * l) / 1280.0f;
+}
+
+static f32 MmNew_Y(f32 py) {
+    return py * 448.0f / 720.0f;
+}
+
+/* A picture centred on the design's (cx, cy), h of the design's pixels tall. */
+static void MmNew_Pic(s32 id, f32 cx, f32 cy, f32 h, s32 a) {
+    Ps_Icon(id, MmNew_X(cx), MmNew_Y(cy), MmNew_Y(h), a);
+}
+
+/* The rows: the design's top of row i (0..5) and its height; the chosen row is taller. */
+#define MMNEW_TOP 160.0f
+#define MMNEW_ROW_H 46.0f
+#define MMNEW_SEL_H 62.0f
+#define MMNEW_GAP 6.0f
+
+static void MmNew_Hide(MFlash *flash) {
+    MFlashRef ref;
+    char name[64];
+    s32 i;
+
+    for (i = 0; i < 7; i++) {
+        sprintf(name, "mc_menu_plate_%d", i + 1);
+        Flash_FindLabel(flash, NULL, name, &ref);
+        Flash_ClipSetFlags(flash, &ref, 2, 0);
+        sprintf(name, "mc_ch_a_db_%d", i + 1);
+        Flash_FindLabel(flash, NULL, name, &ref);
+        Flash_ClipSetFlags(flash, &ref, 2, 0);
+    }
+    Flash_FindLabel(flash, NULL, "mc_menu_yajirusi", &ref);
+    Flash_ClipSetFlags(flash, &ref, 2, 0);
+}
+
+static void MmNew_DrawList(void) {
+    s32 a;
+    s32 i;
+    s32 item;
+    s32 sel = gMainMenu->cursor + 1;
+    f32 y = MMNEW_TOP;
+    f32 h;
+    f32 x0;
+    f32 x1;
+    f32 scale;
+    u32 top;
+    u32 bot;
+    u32 line;
+
+    if (sMmFor != (void *)gMainMenu) {
+        sMmFor = gMainMenu;
+        sMmFrames = 0;
+    }
+    sMmFrames++;
+    a = sMmFrames * 8 > 0x80 ? 0x80 : sMmFrames * 8;
+    Ps_PageSet();
+    Ps_SetShift(0.0f);
+
+    Ps_Stand(MM2_CLOUD, MmNew_X(1190.0f), MmNew_Y(112.0f), MmNew_Y(120.0f), a);
+    Ps_Stand(MM2_TITLE, MmNew_X(262.0f), MmNew_Y(146.0f), MmNew_Y(146.0f), a);
+    MmNew_Pic(MM2_UP, 277.0f, MMNEW_TOP - 12.0f, 24.0f, a);
+
+    for (i = 0; i < 6; i++) {
+        item = gMainMenu->items[(gMainMenu->top + i) % gMainMenu->itemCount];
+        h = i == sel ? MMNEW_SEL_H : MMNEW_ROW_H;
+        x0 = i == sel ? 40.0f : 58.0f;
+        x1 = i == sel ? 492.0f : 440.0f;
+        Ps_Pill(i == sel ? MM2_BAR_SEL : MM2_BAR, MmNew_X(x0), MmNew_Y(y), MmNew_X(x1), MmNew_Y(y + h), a);
+        MmNew_Pic(kMmIcon[item], x0 + 42.0f, y + h * 0.5f, h * 1.18f, a);
+        y += h + MMNEW_GAP;
+    }
+    MmNew_Pic(MM2_DOWN, 270.0f, y + 10.0f, 24.0f, a);
+
+    y += 26.0f; /* the balls' frame */
+    Ps_Pill(MM2_FRAME, MmNew_X(34.0f), MmNew_Y(y), MmNew_X(456.0f), MmNew_Y(y + 58.0f), a);
+    for (i = 0; i < 7; i++) {
+        MmNew_Pic((gSaveData->unlockFlags & (s32)(1U << i)) ? MM2_BALL_LIT_1 + i : MM2_BALL_DIM_1 + i,
+                  92.0f + i * 51.0f, y + 29.0f, 42.0f, a);
+    }
+
+    /* the names, over every picture */
+    y = MMNEW_TOP;
+    for (i = 0; i < 6; i++) {
+        item = gMainMenu->items[(gMainMenu->top + i) % gMainMenu->itemCount];
+        h = i == sel ? MMNEW_SEL_H : MMNEW_ROW_H;
+        x0 = i == sel ? 40.0f : 58.0f;
+        x1 = i == sel ? 492.0f : 440.0f;
+        scale = i == sel ? 1.0f : 0.74f;
+        if (i == sel) {
+            top = Ps_Rgba(0xFF, 0xFF, 0xFF, a);
+            bot = Ps_Rgba(0xFF, 0xF0, 0xC8, a);
+            line = Ps_Rgba(0x46, 0x1C, 0x00, a);
+        } else {
+            top = Ps_Rgba(0xFF, 0xFF, 0xFF, a);
+            bot = Ps_Rgba(0xD4, 0xE2, 0xFF, a);
+            line = Ps_Rgba(0x06, 0x10, 0x26, a);
+        }
+        Ps_TextEx(MmNew_X(x0 + 90.0f), Ps_TextTop(MmNew_Y(y + h * 0.5f), scale), (char *)kMmName[item], scale,
+                  MmNew_X(x1 - (i == sel ? 70.0f : 30.0f)) - MmNew_X(x0 + 90.0f), top, bot, line);
+        y += h + MMNEW_GAP;
+    }
+}
+
+/* The keys at the foot, right of the message window's line: Enter / Cross choose, Esc / Circle go back. */
+static void MmNew_DrawKeys(void) {
+    s32 a = sMmFrames * 8 > 0x80 ? 0x80 : sMmFrames * 8;
+    f32 cy = 690.0f;
+    f32 x = 1252.0f;
+    f32 w;
+    u32 top = Ps_Rgba(0xFF, 0xFF, 0xFF, a);
+    u32 bot = Ps_Rgba(0xE6, 0xEE, 0xFF, a);
+    u32 line = Ps_Rgba(0x06, 0x10, 0x26, a);
+
+    /* right to left: O, X, BACK, Esc, |, SELECT, Enter */
+    MmNew_Pic(MM2_K_O, x - 16.0f, cy, 32.0f, a);
+    x -= 38.0f;
+    MmNew_Pic(MM2_K_X, x - 16.0f, cy, 32.0f, a);
+    x -= 46.0f;
+    w = Ps_TextWidth("BACK", 0.62f);
+    Ps_TextEx(MmNew_X(x) - w, Ps_TextTop(MmNew_Y(cy), 0.62f), "BACK", 0.62f, 0.0f, top, bot, line);
+    x -= (w / (MmNew_X(1.0f) - MmNew_X(0.0f))) + 8.0f;
+    MmNew_Pic(MM2_K_ESC, x - 24.0f, cy, 30.0f, a);
+    x -= 66.0f;
+    w = Ps_TextWidth("SELECT", 0.62f);
+    Ps_TextEx(MmNew_X(x) - w, Ps_TextTop(MmNew_Y(cy), 0.62f), "SELECT", 0.62f, 0.0f, top, bot, line);
+    x -= (w / (MmNew_X(1.0f) - MmNew_X(0.0f))) + 8.0f;
+    MmNew_Pic(MM2_K_ENTER, x - 24.0f, cy, 30.0f, a);
+}
+#endif
+
 /* Draws the background, sets up every clip of the movie for this frame and draws it and the two windows. */
 void MainMenu_Draw(void) {
     MFlashRef ref;
@@ -502,13 +672,28 @@ void MainMenu_Draw(void) {
         FlashAnim_Scroll(flash, &ref, &uv, &gMainMenu->cloud[i], NULL, i ? -0.18962963f : -0.35555556f, 0.0f);
     }
 
+#ifdef PORT
+    if (MmNew_On()) {
+        MmNew_Hide(flash);
+    }
+#endif
     for (i = 0; i < MAINMENU_FLASH_NUM; i++) {
         Flash_Draw(&gMainMenu->flash[i]);
     }
+#ifdef PORT
+    if (MmNew_On()) {
+        MmNew_DrawList();
+    } else {
+        IconWin_Draw();
+    }
+    MsgWin_Draw(0, 0, gMainMenu->voiceLine);
+    if (MmNew_On()) {
+        MmNew_DrawKeys();
+    }
+    Port_MenuPage(0);
+#else
     IconWin_Draw();
     MsgWin_Draw(0, 0, gMainMenu->voiceLine);
-#ifdef PORT
-    Port_MenuPage(0);
 #endif
 }
 

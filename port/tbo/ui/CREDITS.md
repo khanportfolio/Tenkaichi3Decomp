@@ -18,3 +18,4 @@ by their sizes, `include/menu/tbo_sizes.h`).
 
 - `lobby_bg.png` and the `lb2_*.png` pieces of the lobby (18 Nov 2026, this modded copy): the player's own design, made with an image AI;
   cut and drawn by `port/tools/lobby_art.py`.
+- `mm2_*.png`: the main menu's own look (19 Nov 2026), cut from the user's design made with an image AI (Super-Characters/tools/menu_art.py); the dragon balls drawn by that script.
