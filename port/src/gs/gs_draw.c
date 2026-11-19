@@ -2095,7 +2095,7 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
     }
     date_snapshot(&d);
     if (sLast != NULL && !d.tex_is_target && sLast->tex == d.tex && sLast->backdrop && sLast->replaced == 1 &&
-        gsTargets[d.target].fbp == (uint32_t)gGsMainFbp && !lowres_now(d.target)) {
+        gsTargets[d.target].fbp == (uint32_t)gGsMainFbp) { /* (19 Nov: not only outside the glow's low-resolution passes) */
         /* A menu's backdrop video (15 Nov 2026, gs_texpack.c backdrop): the first of the screen's background layers
            in this frame becomes the video over the whole picture (the scissor's rectangle, which the game sets to
            the page), the others are left out. What the game draws after them (the menu, its text, the frames)
@@ -2131,8 +2131,10 @@ void GsGpu_Draw(int type, int ctx, const GsVertex *v) {
         gsDraws[gsDrawCount++] = d;
         return;
     }
-    if (sLast != NULL && !d.tex_is_target && sLast->tex == d.tex && sLast->backdrop && sLast->replaced != 1 &&
-        gsTargets[d.target].fbp == (uint32_t)gGsMainFbp && !lowres_now(d.target)) {
+    if (sLast != NULL && !d.tex_is_target && sLast->tex == d.tex && sLast->backdrop) {
+        /* 19 Nov 2026 (the user's screenshots: the home screen's video in pieces, one copy per background layer):
+           a backdrop layer that is not the whole-picture video above (another target, or the video not read yet)
+           is left out, never drawn with the video stretched over its own small rectangle */
         /* 18 Nov 2026: a backdrop video not read yet: its layers are left out (the menu over black) rather than
            the menu's old background showing for a moment */
         return;
