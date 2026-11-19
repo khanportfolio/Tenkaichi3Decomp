@@ -397,10 +397,10 @@ static void MmNew_Pic(s32 id, f32 cx, f32 cy, f32 h, s32 a) {
 }
 
 /* The rows: the design's top of row i (0..5) and its height; the chosen row is taller. */
-#define MMNEW_TOP 160.0f
-#define MMNEW_ROW_H 46.0f
-#define MMNEW_SEL_H 62.0f
-#define MMNEW_GAP 6.0f
+#define MMNEW_TOP 150.0f
+#define MMNEW_ROW_H 42.0f
+#define MMNEW_SEL_H 58.0f
+#define MMNEW_GAP 5.0f
 
 static void MmNew_Hide(MFlash *flash) {
     MFlashRef ref;
@@ -458,14 +458,13 @@ static void MmNew_DrawList(void) {
         MmNew_Pic(kMmIcon[item], x0 + 42.0f, y + h * 0.5f, h * 1.18f, a);
         y += h + MMNEW_GAP;
     }
-    MmNew_Pic(MM2_DOWN, 270.0f, y + 10.0f, 24.0f, a);
-
-    y += 26.0f; /* the balls' frame */
-    Ps_Pill(MM2_FRAME, MmNew_X(34.0f), MmNew_Y(y), MmNew_X(456.0f), MmNew_Y(y + 58.0f), a);
+    /* the balls' frame, over the movie's own tray of balls (a picture of its timeline, not a clip to hide) */
+    Ps_Pill(MM2_FRAME, MmNew_X(0.0f), MmNew_Y(y + 4.0f), MmNew_X(470.0f), MmNew_Y(y + 68.0f), a);
     for (i = 0; i < 7; i++) {
         MmNew_Pic((gSaveData->unlockFlags & (s32)(1U << i)) ? MM2_BALL_LIT_1 + i : MM2_BALL_DIM_1 + i,
-                  92.0f + i * 51.0f, y + 29.0f, 42.0f, a);
+                  86.0f + i * 52.0f, y + 36.0f, 46.0f, a);
     }
+    MmNew_Pic(MM2_DOWN, 270.0f, y + 2.0f, 24.0f, a);
 
     /* the names, over every picture */
     y = MMNEW_TOP;
