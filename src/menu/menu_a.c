@@ -417,6 +417,14 @@ static void MmNew_Hide(MFlash *flash) {
     }
     Flash_FindLabel(flash, NULL, "mc_menu_yajirusi", &ref);
     Flash_ClipSetFlags(flash, &ref, 2, 0);
+    { /* (19 Nov: the old guides and their car, under the backdrop video; they showed through it now and then) */
+        static const char *const old[] = {"mc_guide_ghn_bdl", "mc_guide_gtn_trks", "mc_guide_car_shadow", "mc_guide_car_tire_a",
+                                          "mc_guide_car_tire_b"};
+        for (i = 0; i < 5; i++) {
+            Flash_FindLabel(flash, NULL, (char *)old[i], &ref);
+            Flash_ClipSetFlags(flash, &ref, 2, 0);
+        }
+    }
 }
 
 static void MmNew_DrawButton(s32 a); /* (the credits's button, below) */
