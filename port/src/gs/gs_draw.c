@@ -914,6 +914,75 @@ static GsTex pack_texture(const TexPackImage *pack) {
     return tex;
 }
 
+/* An indexed replacement (TexPack_IsIndexed) coloured with the palette the texture has now: level 0 from the
+   indices, the smaller levels each the average of 2 x 2 pixels of the one before. */
+static GsTex indexed_texture(const TexPackImage *pack, uint32_t cbp, uint32_t cpsm, uint32_t bits) {
+    uint32_t lut[256], i, w = pack->w, h = pack->h, n = bits == 8 ? 256u : 16u, mask = n - 1, x, y;
+    uint32_t *lv, *prev;
+    const uint8_t *src = pack->data[0];
+    int level, levels = 1;
+    GsTex tex;
+
+    if (pack->format != 0 || src == NULL || w == 0 || h == 0) {
+        return pack_texture(pack);
+    }
+    for (i = 0; i < n; i++) {
+        if (bits == 8) {
+            uint32_t k = (i & 0xE7) | ((i & 8) << 1) | ((i & 0x10) >> 1);
+            lut[i] = Gs_Expand(Gs_VramRead(cbp, 1, cpsm, k & 15, k >> 4), cpsm);
+        } else {
+            lut[i] = Gs_Expand(Gs_VramRead(cbp, 1, cpsm, i & 7, i >> 3), cpsm);
+        }
+    }
+    while (levels < TEXPACK_MAX_LEVELS && ((w >> levels) > 0 || (h >> levels) > 0)) {
+        levels++;
+    }
+    tex = sBackend->texCreate(w, h, GS_TEXFMT_RGBA8, levels);
+    if (tex == 0) {
+        return 0;
+    }
+    lv = malloc((size_t)w * h * 4);
+    if (lv == NULL) {
+        return tex;
+    }
+    for (i = 0; i < w * h; i++) {
+        const uint8_t *p = src + (size_t)i * 4;
+        uint32_t a = lut[(bits == 8 ? p[0] : p[0] >> 4) & mask], b = lut[(bits == 8 ? p[1] : p[1] >> 4) & mask], t = p[2], c = 0, s;
+        for (s = 0; s < 32; s += 8) {
+            uint32_t ca = (a >> s) & 255, cb = (b >> s) & 255;
+            c |= ((ca * (255 - t) + cb * t + 127) / 255) << s;
+        }
+        lv[i] = c;
+    }
+    prev = lv; /* (each level goes to the back end, which takes it over, once the next is made from it) */
+    for (level = 1; level < levels; level++) {
+        uint32_t pw = w >> (level - 1) ? w >> (level - 1) : 1, ph = h >> (level - 1) ? h >> (level - 1) : 1;
+        uint32_t lw = w >> level ? w >> level : 1, lh = h >> level ? h >> level : 1;
+        uint32_t *cur = malloc((size_t)lw * lh * 4);
+        if (cur == NULL) {
+            break;
+        }
+        for (y = 0; y < lh; y++) {
+            for (x = 0; x < lw; x++) {
+                uint32_t x0 = x * 2 < pw ? x * 2 : pw - 1, y0 = y * 2 < ph ? y * 2 : ph - 1;
+                uint32_t x1 = x0 + 1 < pw ? x0 + 1 : x0, y1 = y0 + 1 < ph ? y0 + 1 : y0, c = 0, s;
+                uint32_t q[4] = {prev[y0 * pw + x0], prev[y0 * pw + x1], prev[y1 * pw + x0], prev[y1 * pw + x1]};
+                for (s = 0; s < 32; s += 8) {
+                    c |= ((((q[0] >> s) & 255) + ((q[1] >> s) & 255) + ((q[2] >> s) & 255) + ((q[3] >> s) & 255) + 2) / 4) << s;
+                }
+                cur[y * lw + x] = c;
+            }
+        }
+        sBackend->texUpload(tex, level - 1, pw, ph, GS_TEXFMT_RGBA8, prev, pw * ph * 4);
+        prev = cur;
+    }
+    {
+        uint32_t lw = w >> (level - 1) ? w >> (level - 1) : 1, lh = h >> (level - 1) ? h >> (level - 1) : 1;
+        sBackend->texUpload(tex, level - 1, lw, lh, GS_TEXFMT_RGBA8, prev, lw * lh * 4);
+    }
+    return tex;
+}
+
 /* Textures replaced in a cache entry: the frames before may still draw them (Smooth motion draws the last one again
    while the game makes the next), so they are released a few frames later. */
 static struct { GsTex tex; unsigned frame; } sOld[512];
@@ -995,7 +1064,12 @@ static void pack_arrived(Tex *c) {
     if (got == 0 || sOldHead - sOldTail >= 512 || sBackend->texSlotsLeft() < pack.levels || !pack_budget_take(&pack)) {
         return; /* (not yet: asked again at the next frame's first use) */
     }
-    tex = pack_texture(&pack);
+    if (TexPack_IsIndexed(c->pack)) { /* (coloured with the palette in use now: this entry is being drawn with it) */
+        uint32_t psm = (uint32_t)(c->tex0 >> 20) & 63;
+        tex = indexed_texture(&pack, (uint32_t)(c->tex0 >> 37) & 0x3FFF, (uint32_t)(c->tex0 >> 51) & 15, psm == 0x13 ? 8u : 4u);
+    } else {
+        tex = pack_texture(&pack);
+    }
     if (tex == 0) {
         return;
     }
@@ -1117,6 +1191,7 @@ static GsTex texture_get(int ctx) {
     uint64_t tex_t0;
     TexPackImage pack;
     uint32_t packMaxAlpha = 255, rw = tw, rh = th;
+    int packId = -1;
     int replaced = 0, menuText = 0, sharedText = 0, battleText = 0, packWait = -1, animId = -1, isBackdrop = 0, backdropId = -1;
 
     if (tw > 1024) { tw = 1024; }
@@ -1206,6 +1281,7 @@ static GsTex texture_get(int ctx) {
         backdropId = isBackdrop ? id : -1;
         if (got > 0 && sBackend->texSlotsLeft() >= pack.levels && pack_budget_take(&pack)) {
             replaced = 1;
+            packId = id;
             animId = pack.frames > 1 ? id : -1;
             gGpuTexReplaced++;
             rw = pack.w;
@@ -1292,7 +1368,8 @@ static GsTex texture_get(int ctx) {
     gDrawTexNs += gpu_now() - tex_t0;
     gDrawNewTex++;
     t = &sTex[gsTexCount];
-    t->tex = replaced ? pack_texture(&pack) : sBackend->texCreate(rw, rh, GS_TEXFMT_RGBA8, 1);
+    t->tex = replaced ? (TexPack_IsIndexed(packId) ? indexed_texture(&pack, cbp, cpsm, bits) : pack_texture(&pack))
+                     : sBackend->texCreate(rw, rh, GS_TEXFMT_RGBA8, 1);
     if (t->tex == 0) {
         free(px);
         return gsWhite;

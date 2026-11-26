@@ -331,6 +331,9 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
         if (id < 0) {
             id = find(tex, XXH3_64bits(clut, count * 4), bits, 1);
         }
+        if (id < 0) {
+            id = find(tex, 0, bits, 0); /* an indexed replacement (TexPack_IsIndexed): any palette */
+        }
         if (getenv("BT3_TEX_LOG") != NULL) { /* which textures a pack has and which it has not, by the name it would need */
             fprintf(stderr, "texpack: %s %ux%u %u-bit %llx-%llx-%08x%s%s\n", id >= 0 ? "found  " : "missing", tw, th, psm == 0x13 ? 8u : 4u,
                     (unsigned long long)tex, (unsigned long long)XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, id >= 0 ? " " : "",
@@ -581,6 +584,20 @@ static void trim(uint32_t keep) {
             sHeld[old] = sHeld[--sHeldCount];
         }
     }
+}
+
+/* 26 Nov 2026: a replacement named without a palette hash for a 4- or 8-bit texture ("<texture hash>-<bits>.png")
+   holds palette INDICES, not colours: R the index, G a second index and B how much of the second (0..255), so an
+   enlarged picture keeps smooth edges between two colours. The renderer colours it with the palette the texture
+   has at that moment: the fighters' palettes change during a fight (hits, lighting, the 2P colours), which a
+   picture of fixed colours would only match in one of them. */
+int TexPack_IsIndexed(int id) {
+    uint32_t psm;
+    if (id < 0 || (uint32_t)id >= sCount || sEntries[id].pal) {
+        return 0;
+    }
+    psm = sEntries[id].bits & 63;
+    return psm == 0x13 || psm == 0x14;
 }
 
 int TexPack_IsBackdrop(int id) {

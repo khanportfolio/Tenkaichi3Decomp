@@ -31,6 +31,8 @@ int TexPack_Get(int id, TexPackImage *img);
 /* 1 when replacement `id` is a menu's backdrop video (a folder with backdrop.txt): the renderer draws the video once
    over the whole screen at the first of these textures in a frame and leaves the others of the frame out. */
 int TexPack_IsBackdrop(int id);
+/* 1 when replacement `id` holds palette indices (R, G and B's share of G) to colour with the texture's palette now. */
+int TexPack_IsIndexed(int id);
 /* Its sound (backdrop.txt "audio <file>": an mp3, wav or flac played in a loop while the backdrop is shown, the
    game's music silent meanwhile), or NULL. */
 const char *TexPack_BackdropAudio(int id);
