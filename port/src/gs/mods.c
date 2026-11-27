@@ -823,6 +823,31 @@ static int l_look(lua_State *L) {
             sLookBuild.haze_start = !(v > 0) ? 0 : v > 999 ? 999 : (int)(v + 0.5);
         }
         lua_pop(L, 1);
+        lua_getfield(L, 1, "sun_rays");
+        if (!lua_isnil(L, -1)) {
+            lua_Number v = luaL_checknumber(L, -1);
+            sLookBuild.sun_rays = !(v > 0) ? 0 : v > 100 ? 100 : (int)(v + 0.5);
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "sun_x");
+        if (!lua_isnil(L, -1)) {
+            lua_Number v = luaL_checknumber(L, -1);
+            sLookBuild.sun_x = !(v > -100) ? -100 : v > 200 ? 200 : (int)v;
+            sLookBuild.sun_set = 1;
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "sun_y");
+        if (!lua_isnil(L, -1)) {
+            lua_Number v = luaL_checknumber(L, -1);
+            sLookBuild.sun_y = !(v > -100) ? -100 : v > 200 ? 200 : (int)v;
+            sLookBuild.sun_set = 1;
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "sun_color");
+        if (!lua_isnil(L, -1)) {
+            sLookBuild.sun_color = (unsigned)luaL_checkinteger(L, -1);
+        }
+        lua_pop(L, 1);
         lua_getfield(L, 1, "haze_color");
         if (!lua_isnil(L, -1)) {
             sLookBuild.haze_color = (unsigned)luaL_checkinteger(L, -1);

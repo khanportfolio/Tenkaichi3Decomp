@@ -1406,6 +1406,8 @@ static bool tab(const char *label, int index) {
 }
 
 extern "C" int GsDraw_AutoQuality(void);       // gs_draw.c: automatic quality (18 Nov 2026)
+extern "C" int GsDraw_SmoothLevel(void);       // gs_draw.c: smooth models (28 Nov 2026)
+extern "C" void GsDraw_SmoothSet(int lv);
 extern "C" void GsDraw_AutoQualitySet(int on);
 static void video_tab(PortVideo &v) {
     static const struct { const char *name; int milli; } aspects[] = {{"4:3 (original)", 1333}, {"16:10", 1600}, {"16:9", 1778}, {"21:9", 2389}, {"32:9", 3556}};
@@ -1610,6 +1612,32 @@ static void effects_tab(PortVideo &v) {
     if (ImGui::Checkbox("Sharp stage blur", &sharp)) { v.sharpBlur = sharp; }
     ImGui::SetItemTooltip("On: the stage's blur keeps the detail of the internal resolution (crisper, as other\n"
                           "emulators show it upscaled). Off: as soft as the PlayStation 2 draws it. No difference at 1x.");
+    {   /* 28 Nov 2026: what this PC adds over the PlayStation 2 */
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextDisabled("Modern graphics");
+        int lv = GsDraw_SmoothLevel();
+        if (ImGui::SliderInt("Smooth models", &lv, 1, 5, lv <= 1 ? "Off" : "Level %d", ImGuiSliderFlags_AlwaysClamp)) {
+            GsDraw_SmoothSet(lv);
+        }
+        ImGui::SetItemTooltip("The fighters with many more triangles: round heads, arms, hair and clothes instead of\n"
+                              "flat facets. Level 4 (the default) makes 16 triangles of each; 5 makes 25 and can stutter\n"
+                              "on a slower PC. Off: the PlayStation 2's own models.");
+        bool aa = Port_Setting("post_aa", 1) != 0;
+        if (ImGui::Checkbox("Anti-aliasing", &aa)) { Port_SettingSave("post_aa", aa ? 1 : 0); Port_SettingsWrite(); }
+        ImGui::SetItemTooltip("Smooths the stair steps along edges (needs Picture finishing on).");
+        int bloom = Port_Setting("bloom", 100);
+        if (ImGui::SliderInt("Cinematic glow", &bloom, 0, 200, bloom == 0 ? "Off" : "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+            Port_SettingSave("bloom", bloom);
+            Port_SettingsWrite();
+        }
+        ImGui::SetItemTooltip("A wide soft glow of light around beams, blasts, auras and a Super Saiyan's hair, as in a\n"
+                              "film. The open sky glows much less, so a bright day stays clear.");
+        bool rays = Port_Setting("sun_rays", 1) != 0;
+        if (ImGui::Checkbox("Sun rays", &rays)) { Port_SettingSave("sun_rays", rays ? 1 : 0); Port_SettingsWrite(); }
+        ImGui::SetItemTooltip("Shafts of light from the sky past the fighters and the scenery, in each stage's own light\n"
+                              "(the Modern look mod's stage looks; none at night or indoors).");
+    }
 }
 
 // ---- the automatic update (gs/net_update.c) ----

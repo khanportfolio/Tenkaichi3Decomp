@@ -190,6 +190,7 @@ steps. Up to 24 settings, 8 choices each.
 | `saturation`, `vibrance`, `contrast`, `balance` | a stage's own look: percent (1..300) of the vivid colours' own saturation, vibrance, contrast and colour-cast removal; the last mod asking wins |
 | `shadow_tint` | `{r, g, b}` (-1..1 each): the shadows' tint instead of the vivid colours' blue-violet |
 | `haze`, `haze_start`, `haze_color` | atmosphere: distant scenery fades into the air colour (0xRRGGBBAA); strength 0..100, start in per mille of the game's depth range from the camera (default 900) |
+| `sun_rays`, `sun_x`, `sun_y`, `sun_color` | sun rays: light shafts from the open sky past what stands in front of it; strength 0..100, where the light comes from in percent of the picture (-100..200; default 62, -10), its colour (0xRRGGBBAA). F1 > Effects > Sun rays switches them off; the cinematic glow beside it is the engine's own (`bloom` setting, percent) |
 | `ambient` | soft shadows in creases and where things meet the ground, from the depth buffer |
 | `energy` | what adds light (ki blasts, beams, sparks, flashes) drawn stronger and more saturated |
 | `energy_light` | that light tinting the ground, rocks and fighters round it |

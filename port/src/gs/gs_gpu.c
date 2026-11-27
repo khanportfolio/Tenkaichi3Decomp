@@ -44,7 +44,8 @@ static SDL_GPUTextureFormat sPostFormat;
 static int sPostTried;
 /* A script mod's look pass (native effect 6, shaders/grade.frag; gs_draw.c grade_add): its pipeline and the copy of
    the picture it reads, and the scene's average colour followed slowly (avg.frag) for its colour balance. */
-static SDL_GPUGraphicsPipeline *sGradePipe, *sAvgPipe;
+static SDL_GPUGraphicsPipeline *sGradePipe, *sAvgPipe, *sBrightPipe; /* (sBrightPipe: bright.frag, 28 Nov 2026) */
+static SDL_GPUTexture *sBright; /* half size, mipmaps: the glow's and the sun rays' source */
 static SDL_GPUTexture *sGradeCopy, *sBalance; /* (the copy has mipmaps; sBalance: 1 x 1) */
 static SDL_GPUSampler *sGradeSampler;         /* linear, between mipmaps too */
 static Uint32 sGradeW, sGradeH, sGradeLevels;
@@ -819,7 +820,7 @@ static int vk_init(void) {
         }
         /* the look pass: the picture's colours replaced, alpha (the objects' numbers) kept. Without it the picture
            stays as the game draws it. */
-        fs = shader(SHADER_CODE(kGradeFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
+        fs = shader(SHADER_CODE(kGradeFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
         cd.blend_state.enable_blend = false;
         ci.fragment_shader = fs;
         sGradePipe = fs ? SDL_CreateGPUGraphicsPipeline(sDev, &ci) : NULL;
@@ -864,6 +865,20 @@ static int vk_init(void) {
             if (sAvgPipe == NULL || sGradeSampler == NULL || sBalance == NULL) {
                 fprintf(stderr, "bt3: look balance: %s (the colours stay as they are)\n", SDL_GetError());
                 if (sGradePipe) { SDL_ReleaseGPUGraphicsPipeline(sDev, sGradePipe); sGradePipe = NULL; }
+            }
+            {   /* the glow's source (bright.frag): no blending, all four channels */
+                SDL_GPUColorTargetDescription bd = ad;
+                SDL_GPUGraphicsPipelineCreateInfo bi = ci;
+                bd.blend_state.enable_blend = false;
+                bd.blend_state.enable_color_write_mask = false;
+                bi.target_info.color_target_descriptions = &bd;
+                fs = shader(SHADER_CODE(kBrightFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+                bi.fragment_shader = fs;
+                sBrightPipe = fs ? SDL_CreateGPUGraphicsPipeline(sDev, &bi) : NULL;
+                if (fs) { SDL_ReleaseGPUShader(sDev, fs); }
+                if (sBrightPipe == NULL) {
+                    fprintf(stderr, "bt3: glow pipeline: %s (no cinematic glow or sun rays)\n", SDL_GetError());
+                }
             }
         }
         cd.blend_state.enable_blend = true;
@@ -1490,13 +1505,21 @@ static void vk_frame_end(void) {
                     sGradeCopy = SDL_CreateGPUTexture(sDev, &tci);
                     sGradeW = w;
                     sGradeH = h;
+                    if (sBright != NULL) { SDL_ReleaseGPUTexture(sDev, sBright); }
+                    tci.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+                    tci.width = w / 2;
+                    tci.height = h / 2;
+                    for (tci.num_levels = 1; ((m / 2) >> tci.num_levels) > 0; tci.num_levels++) {
+                    }
+                    sBright = SDL_CreateGPUTexture(sDev, &tci);
                 }
                 if (sGradeCopy != NULL) {
                     SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
                     SDL_GPUTextureLocation from, to;
                     SDL_GPUColorTargetInfo ft;
-                    SDL_GPUTextureSamplerBinding fs[3];
-                    float params[16 + GS_LIGHTS * 8 + 8];
+                    SDL_GPUTextureSamplerBinding fs[4];
+                    float params[16 + GS_LIGHTS * 8 + 16];
+                    int brightOk = 0;
                     SDL_zero(from);
                     SDL_zero(to);
                     from.texture = sTgCol[d->target];
@@ -1528,6 +1551,29 @@ static void vk_frame_end(void) {
                         pass = NULL;
                         sBalanceFresh = 0;
                     }
+                    if (sBrightPipe != NULL && sBright != NULL && (gsGradeFx[0] > 0.0f || gsGradeFx[2] > 0.0f)) {
+                        /* the glow's and the sun rays' source, half size, then its mipmaps (the blurs) */
+                        SDL_GPUColorTargetInfo bt;
+                        SDL_GPUTextureSamplerBinding bs[2];
+                        float bp[4] = {gsGradeFx[1], 0.12f, d->blendc, 0.0f};
+                        SDL_zero(bt);
+                        bt.texture = sBright;
+                        bt.load_op = SDL_GPU_LOADOP_DONT_CARE;
+                        bt.store_op = SDL_GPU_STOREOP_STORE;
+                        pass = SDL_BeginGPURenderPass(cmd, &bt, 1, NULL);
+                        SDL_BindGPUGraphicsPipeline(pass, sBrightPipe);
+                        bs[0].texture = sGradeCopy;
+                        bs[0].sampler = sGradeSampler;
+                        bs[1].texture = sTgDep[d->target];
+                        bs[1].sampler = sSamplers[6];
+                        SDL_BindGPUFragmentSamplers(pass, 0, bs, 2);
+                        SDL_PushGPUFragmentUniformData(cmd, 0, bp, sizeof(bp));
+                        SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+                        SDL_EndGPURenderPass(pass);
+                        pass = NULL;
+                        SDL_GenerateMipmapsForGPUTexture(cmd, sBright);
+                        brightOk = 1;
+                    }
                     SDL_zero(ft);
                     ft.texture = sTgCol[d->target];
                     ft.load_op = SDL_GPU_LOADOP_LOAD;
@@ -1540,7 +1586,9 @@ static void vk_frame_end(void) {
                     fs[1].sampler = sSamplers[6];
                     fs[2].texture = sBalance;
                     fs[2].sampler = sSamplers[6];
-                    SDL_BindGPUFragmentSamplers(pass, 0, fs, 3);
+                    fs[3].texture = brightOk ? sBright : sGradeCopy; /* (the glow's source; unused without it) */
+                    fs[3].sampler = sGradeSampler;
+                    SDL_BindGPUFragmentSamplers(pass, 0, fs, 4);
                     memcpy(params, d->misc, sizeof(float) * 4);
                     memcpy(params + 4, d->rect, sizeof(float) * 4);
                     memcpy(params + 8, d->orig, sizeof(float) * 4);
@@ -1562,6 +1610,20 @@ static void vk_frame_end(void) {
                         float *z = params + 16 + GS_LIGHTS * 8;
                         z[0] = gsGradeHaze[0]; z[1] = gsGradeHaze[1]; z[2] = gsGradeHaze[2]; z[3] = gsGradeHaze[3];
                         z[4] = gsGradeHaze[4]; z[5] = z[6] = z[7] = 0.0f;
+                        if (brightOk) { /* (28 Nov 2026: the cinematic glow and the sun rays) */
+                            float b0 = 0.0f;
+                            for (Uint32 s3 = SCALE; s3 > 2; s3 >>= 1) { b0 += 1.0f; } /* (the source's level 0: SCALE / 2 per GS pixel) */
+                            z[5] = gsGradeFx[0];
+                            z[6] = b0;
+                            z[7] = gsGradeFx[2];
+                            z[8] = gsGradeFx[3] * 512.0f / (float)GS_W; /* (the sun in the buffer's uv) */
+                            z[9] = gsGradeFx[4] * 448.0f / (float)GS_H;
+                            z[10] = 512.0f / (float)GS_W;
+                            z[11] = 448.0f / (float)GS_H;
+                            z[12] = gsGradeFx[5]; z[13] = gsGradeFx[6]; z[14] = gsGradeFx[7]; z[15] = 0.0f;
+                        } else {
+                            memset(z + 8, 0, sizeof(float) * 8);
+                        }
                     }
                     SDL_PushGPUFragmentUniformData(cmd, 0, params, sizeof(params));
                     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);

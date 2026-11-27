@@ -16,6 +16,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 2, binding = 0) uniform sampler2D src;        // a copy of the picture as it is now, with mipmaps
 layout(set = 2, binding = 1) uniform sampler2D depthTex;   // the target's depth (GS depth / its maximum)
 layout(set = 2, binding = 2) uniform sampler2D balanceTex; // 1 x 1: the scene's average colour, followed slowly
+layout(set = 2, binding = 3) uniform sampler2D brightTex;  // half size, mipmaps: what glows (rgb), the open sky's light (a)
 layout(set = 3, binding = 0) uniform Params {
     vec4 g; // x: saturation, y: vibrance, z: contrast, w: strength of the grade 0..1
     vec4 h; // xyz: the shadows' tint, w: a GS pixel's width on the screen over its height (the picture's stretch)
@@ -23,8 +24,16 @@ layout(set = 3, binding = 0) uniform Params {
     vec4 q; // x: the depth buffer's maximum / 65536, y: balance strength, z: energy light strength, w: number of lights
     vec4 L[32]; // per light: (x, y, reach, depth) in GS pixels and the game's depth / 65536, then (r, g, b, strength)
     vec4 z0;    // atmosphere: x strength 0..1, y where it starts (far_of), zw the colour's r, g
-    vec4 z1;    // x: the colour's b
+    vec4 z1;    // x: the colour's b; y: cinematic glow strength, z: its source's base level, w: sun rays strength
+    vec4 z2;    // xy: where the sun's light comes from (the buffer's uv), zw: the picture's part of the buffer
+    vec4 z3;    // xyz: the sun's colour
 } p;
+
+vec3 glow_at(vec2 uv, float lod) { // a soft tent of four samples at a level of the glow's source
+    vec2 t = 0.75 / vec2(textureSize(brightTex, int(lod)));
+    return (textureLod(brightTex, uv + vec2(t.x, t.y), lod).rgb + textureLod(brightTex, uv + vec2(-t.x, t.y), lod).rgb +
+            textureLod(brightTex, uv + vec2(t.x, -t.y), lod).rgb + textureLod(brightTex, uv - t, lod).rgb) * 0.25;
+}
 
 const vec3 kLum = vec3(0.2126, 0.7152, 0.0722);
 
@@ -137,6 +146,31 @@ void main() {
         float L = clamp(dot(c, kLum), 0.0, 1.0);
         c += p.h.xyz * (1.0 - L) * (1.0 - L) * 0.08;              // the shadows a touch cool
         c = mix(a, clamp(c, 0.0, 1.0), p.g.w);
+    }
+    if (p.z1.w > 0.0) {
+        // sun rays (28 Nov 2026; light scattering as in GPU Gems 3, ch. 13): from this pixel toward the sun, the open
+        // sky's light gathered, fading with the distance; where a fighter or a rock stands in front of the sky the
+        // gathering is interrupted, so shafts of light and shadow fall from behind them
+        vec2 d = (p.z2.xy - vUv) / 32.0, u = vUv;
+        float acc = 0.0, w = 1.0;
+        for (int i = 0; i < 32; i++) {
+            u += d;
+            vec2 q = clamp(u, vec2(0.0), p.z2.zw);
+            acc += textureLod(brightTex, q, p.z1.z + 2.0).a * w;
+            w *= 0.955;
+        }
+        acc /= 18.0;
+        float sky = far_of(vUv) > 0.9999 ? 0.5 : 1.0; // (in the open sky itself: half, or it only goes white)
+        c += p.z3.xyz * clamp(acc, 0.0, 1.0) * p.z1.w * 0.6 * sky * (1.0 - dot(c, kLum) * 0.5);
+    }
+    if (p.z1.y > 0.0) {
+        // cinematic glow (28 Nov 2026): what is brighter than the threshold (bright.frag) spread wide in four sizes,
+        // the near ones strongest, laid over like light on film (a screen blend: never past white)
+        float b0 = p.z1.z;
+        vec3 bl = glow_at(vUv, b0 + 1.0) * 0.30 + glow_at(vUv, b0 + 2.0) * 0.30 + glow_at(vUv, b0 + 3.0) * 0.24 +
+                  glow_at(vUv, b0 + 4.0) * 0.16;
+        bl = clamp(bl * p.z1.y, 0.0, 1.0);
+        c = 1.0 - (1.0 - clamp(c, 0.0, 1.0)) * (1.0 - bl);
     }
     outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }

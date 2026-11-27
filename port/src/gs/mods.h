@@ -127,6 +127,11 @@ typedef struct ModsLook {
        the game's depth range, from the camera) where it begins, haze_color 0xRRGGBBAA */
     int haze, haze_start;
     unsigned haze_color;
+    /* 28 Nov 2026: sun rays: light shafts from the open sky past whatever stands in front of it. sun_rays 0..100,
+       sun_x / sun_y where the light comes from (percent of the picture, -100..200; sun_set when given), sun_color
+       0xRRGGBBAA */
+    int sun_rays, sun_x, sun_y, sun_set;
+    unsigned sun_color;
 } ModsLook;
 const ModsLook *Mods_Look(void);
 

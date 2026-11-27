@@ -9,6 +9,7 @@
 --   - brighter energy: ki blasts, beams and sparks stronger and more saturated;
 --   - energy light: that light tinting the ground, the rocks and the fighters round it.
 --   - atmosphere: what is far fades softly into the air, in each stage's own colour;
+--   - sun rays: shafts of light from the sky past the fighters and the rocks, in each stage's own light;
 --   - map looks (27 Nov 2026): each of the game's stages its own colours, as an anime colourist would set them:
 --     clear and crisp at noon, the sunset's warmth kept in the evening, cool deep blue at night, Namek's green,
 --     the glacier icy, Hell and Dying Namek dramatic, Ruined Earth grey and harsh.
@@ -24,13 +25,18 @@ local RIM_COLOURS = {
 }
 
 -- By stage number (game.stage, the game's stage list): percentages of the vivid colours' own values (saturation,
--- vibrance, contrast, balance: how much of the scene's colour cast is taken out) and the shadows' tint {r, g, b}.
+-- vibrance, contrast, balance: how much of the scene's colour cast is taken out) and the shadows' tint {r, g, b};
+-- the atmosphere (haze); the sun rays (28 Nov: how strong, where the light comes from in percent of the picture,
+-- its colour; F1 > Effects > Sun rays switches them off). None indoors, in space or in Hell.
 local NOON = { saturation = 100, contrast = 105, balance = 140,                   -- (27 Nov: neutral, no orange cast)
-               haze = 45, haze_start = 650, haze_color = 0xCFE3F5FF }
+               haze = 45, haze_start = 650, haze_color = 0xCFE3F5FF,
+               sun_rays = 45, sun_x = 65, sun_y = -15, sun_color = 0xFFF4DCFF }  -- (high, warm white)
 local EVENING = { saturation = 115, vibrance = 115, balance = 35, shadow_tint = { -0.1, -0.35, 0.7 },
-                  haze = 50, haze_start = 650, haze_color = 0xF0C3A6FF }
+                  haze = 50, haze_start = 650, haze_color = 0xF0C3A6FF,
+                  sun_rays = 60, sun_x = 75, sun_y = 5, sun_color = 0xFFB878FF }         -- (low, orange)
 local NIGHT = { saturation = 100, contrast = 85, balance = 40, shadow_tint = { -0.3, -0.15, 0.6 },  -- (115 crushed the ground)
-                haze = 50, haze_start = 650, haze_color = 0x1E2A4AFF }
+                haze = 50, haze_start = 650, haze_color = 0x1E2A4AFF,
+                sun_rays = 15, sun_x = 30, sun_y = -15, sun_color = 0x9DB8FFFF }       -- (faint moonlight)
 local function with(base, extra)
     local t = {}
     for k, v in pairs(base) do t[k] = v end
@@ -41,7 +47,7 @@ local MAP_LOOKS = {
     [0] = NOON,                                                                        -- Wasteland - Noon
     [1] = NOON,                                                                        -- Rocky Area - Noon
     [2] = { saturation = 85, vibrance = 60, balance = 55, shadow_tint = { -0.5, 0.1, 0.6 },       -- Planet Namek
-            haze = 45, haze_start = 650, haze_color = 0xBDEBD3FF },
+            haze = 45, haze_start = 650, haze_color = 0xBDEBD3FF, sun_rays = 40, sun_color = 0xE6FFE8FF },
     [3] = { saturation = 110, contrast = 125, balance = 25, shadow_tint = { 0.2, -0.5, 0.3 },     -- Dying Namek
             haze = 50, haze_start = 600, haze_color = 0x8A3A3AFF },
     [4] = NOON,                                                                        -- World Tournament - Noon
@@ -55,7 +61,7 @@ local MAP_LOOKS = {
     [12] = with(NOON, { saturation = 115, vibrance = 125, haze_color = 0xCFEAF7FF }),  -- Kame House
     [13] = NIGHT,                                                                      -- Planet - Night
     [14] = { saturation = 100, contrast = 110, shadow_tint = { -0.6, -0.1, 1.0 },      -- Glacier
-             haze = 55, haze_start = 600, haze_color = 0xDCEBFAFF },
+             haze = 55, haze_start = 600, haze_color = 0xDCEBFAFF, sun_rays = 40, sun_color = 0xF2F8FFFF },
     [15] = { saturation = 85, contrast = 120, balance = 80, haze = 50, haze_start = 600, haze_color = 0x8C8478FF }, -- Ruined Earth
     [16] = { saturation = 110, contrast = 120, balance = 30 },                         -- Outer Space
     [17] = with(NOON, { saturation = 110, vibrance = 120 }),                           -- Penguin Village
@@ -77,7 +83,7 @@ end
 
 return {
     name = "Modern look",
-    version = "1.2",
+    version = "1.3",
     author = "BT4decomp",
     description = "Anime shading, rim light, vivid colours, ambient shadows and glowing energy.",
     settings = {
@@ -105,6 +111,7 @@ return {
                 shadow_tint = m.shadow_tint,
                 haze = air and m.haze or nil, haze_start = air and m.haze_start or nil,
                 haze_color = air and m.haze_color or nil,
+                sun_rays = m.sun_rays, sun_x = m.sun_x, sun_y = m.sun_y, sun_color = m.sun_color,
             }
         end
         bt3.look {

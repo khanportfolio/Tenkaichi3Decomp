@@ -2705,15 +2705,22 @@ static SNorm *sNorm;
 static unsigned sNormGen = 1;
 static SmoothBatch *sSb;
 
+static int sSmoothLv = -1;
 static int smooth_level(void) {
-    static int lv = -1;
-    if (lv < 0) {
+    if (sSmoothLv < 0) {
         const char *e = getenv("BT3_SMOOTH");
-        lv = e != NULL ? atoi(e) : Port_Setting("smooth_models", 4);
-        lv = lv < 1 ? 1 : lv > SMOOTH_MAX ? SMOOTH_MAX : lv;
-        fprintf(stderr, "bt3: smooth models: level %d (%d triangles for each)\n", lv, lv * lv);
+        int lv = e != NULL ? atoi(e) : Port_Setting("smooth_models", 4);
+        sSmoothLv = lv < 1 ? 1 : lv > SMOOTH_MAX ? SMOOTH_MAX : lv;
+        fprintf(stderr, "bt3: smooth models: level %d (%d triangles for each)\n", sSmoothLv, sSmoothLv * sSmoothLv);
     }
-    return lv;
+    return sSmoothLv;
+}
+/* F1 > Effects (28 Nov 2026): the level now and saved (each level's copies are cached apart, so a change is at once) */
+int GsDraw_SmoothLevel(void) { return smooth_level(); }
+void GsDraw_SmoothSet(int lv) {
+    sSmoothLv = lv < 1 ? 1 : lv > SMOOTH_MAX ? SMOOTH_MAX : lv;
+    Port_SettingSave("smooth_models", sSmoothLv);
+    Port_SettingsWrite();
 }
 
 static SNorm *snorm_slot(const float *p, int add) {
@@ -3096,6 +3103,7 @@ void GsGpu_FbUpload(int second) {
 /* A script mod's vivid colours, ambient shadows and energy light (bt3.look): native effect 6, a pass over the fight's
    picture before its HUD (shaders/grade.frag); only the back end of SDL's GPU API draws it (gs_gpu.c). */
 float gsGradeHaze[5];
+float gsGradeFx[8];
 static void grade_add(void) {
     const ModsLook *lk = Mods_Look();
     GsDraw g;
@@ -3107,7 +3115,22 @@ static void grade_add(void) {
     gsGradeHaze[2] = (float)(lk->haze_color >> 24 & 0xFF) / 255.0f;
     gsGradeHaze[3] = (float)(lk->haze_color >> 16 & 0xFF) / 255.0f;
     gsGradeHaze[4] = (float)(lk->haze_color >> 8 & 0xFF) / 255.0f;
-    if ((lk->vivid <= 0 && lk->ambient <= 0 && lk->energy_light <= 0 && lk->haze <= 0) || sBackend != &sVulkanBackend ||
+    {   /* 28 Nov 2026: the cinematic glow (F1 > Effects, `bloom` percent, 100 the default) and the sun rays (`sun_rays`
+           on / off; how strong, from where and in what colour: the stage's look) */
+        int bloom = Port_Setting("bloom", 100);
+        unsigned sc = lk->sun_color != 0 ? lk->sun_color : 0xFFF0D2FFu;
+        bloom = bloom < 0 ? 0 : bloom > 200 ? 200 : bloom;
+        gsGradeFx[0] = bloom / 100.0f * 1.4f;                      /* strength */
+        gsGradeFx[1] = 0.70f;                                      /* threshold */
+        gsGradeFx[2] = Port_Setting("sun_rays", 1) ? lk->sun_rays / 100.0f : 0.0f;
+        gsGradeFx[3] = (lk->sun_set ? lk->sun_x : 62) / 100.0f;    /* (of the picture) */
+        gsGradeFx[4] = (lk->sun_set ? lk->sun_y : -10) / 100.0f;
+        gsGradeFx[5] = (float)(sc >> 24 & 0xFF) / 255.0f;
+        gsGradeFx[6] = (float)(sc >> 16 & 0xFF) / 255.0f;
+        gsGradeFx[7] = (float)(sc >> 8 & 0xFF) / 255.0f;
+    }
+    if ((lk->vivid <= 0 && lk->ambient <= 0 && lk->energy_light <= 0 && lk->haze <= 0 && gsGradeFx[0] <= 0.0f &&
+         gsGradeFx[2] <= 0.0f) || sBackend != &sVulkanBackend ||
         sGradeFrame == gGsFrame || gsDrawCount >= MAX_DRAWS || gGsMainFbp < 0) {
         return;
     }
