@@ -123,6 +123,10 @@ typedef struct ModsLook {
        0 = not asked (100). shadow_tint: the shadows' tint (r, g, b, each -1..1) when tint_set. */
     int saturation, vibrance, contrast, balance, tint_set;
     float shadow_tint[3];
+    /* 27 Nov 2026: atmosphere: distant scenery fades into the air. haze 0..100, haze_start the depth (per mille of
+       the game's depth range, from the camera) where it begins, haze_color 0xRRGGBBAA */
+    int haze, haze_start;
+    unsigned haze_color;
 } ModsLook;
 const ModsLook *Mods_Look(void);
 

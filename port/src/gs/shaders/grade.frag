@@ -22,6 +22,8 @@ layout(set = 3, binding = 0) uniform Params {
     vec4 o; // x: ambient shadow strength 0..1, y: its radius in uv across, z: the same down, w: debug (1 shadow, 2 depth)
     vec4 q; // x: the depth buffer's maximum / 65536, y: balance strength, z: energy light strength, w: number of lights
     vec4 L[32]; // per light: (x, y, reach, depth) in GS pixels and the game's depth / 65536, then (r, g, b, strength)
+    vec4 z0;    // atmosphere: x strength 0..1, y where it starts (far_of), zw the colour's r, g
+    vec4 z1;    // x: the colour's b
 } p;
 
 const vec3 kLum = vec3(0.2126, 0.7152, 0.0722);
@@ -83,6 +85,17 @@ void main() {
     }
     vec3 avg = texture(balanceTex, vec2(0.5)).rgb;
     float avgL = dot(avg, kLum);
+    if (p.z0.x > 0.0) {
+        // atmosphere (27 Nov 2026): what is far fades into the air's colour, more the farther it is; the fighters
+        // and what is near stay clear, the sky (nothing drawn: far_of 1) keeps its own colours
+        float f = far_of(vUv);
+        if (f < 0.9999) {
+            float t = smoothstep(p.z0.y, 1.0, f);
+            float self = max(c.r, max(c.g, c.b));
+            float k = p.z0.x * t * t * (1.0 - smoothstep(0.8, 0.98, self) * 0.7); // (energy keeps its own light)
+            c = mix(c, vec3(p.z0.z, p.z0.w, p.z1.x), clamp(k, 0.0, 0.85));
+        }
+    }
     if (p.q.z > 0.0 && p.q.w > 0.0) {
         vec2 gs = vUv * vec2(textureSize(src, 0)) / vec2(textureSize(src, 0).x / 1024.0); // (the pixel in GS pixels)
         float here = far_of(vUv);

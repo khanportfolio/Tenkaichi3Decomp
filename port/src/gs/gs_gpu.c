@@ -1496,7 +1496,7 @@ static void vk_frame_end(void) {
                     SDL_GPUTextureLocation from, to;
                     SDL_GPUColorTargetInfo ft;
                     SDL_GPUTextureSamplerBinding fs[3];
-                    float params[16 + GS_LIGHTS * 8];
+                    float params[16 + GS_LIGHTS * 8 + 8];
                     SDL_zero(from);
                     SDL_zero(to);
                     from.texture = sTgCol[d->target];
@@ -1557,6 +1557,11 @@ static void vk_frame_end(void) {
                             o[0] = l->x; o[1] = l->y; o[2] = l->rad; o[3] = l->z;
                             o[4] = l->r; o[5] = l->g; o[6] = l->b; o[7] = l->w;
                         }
+                    }
+                    {   /* (after the lights: the atmosphere, then the finishing pass's anti-aliasing switch) */
+                        float *z = params + 16 + GS_LIGHTS * 8;
+                        z[0] = gsGradeHaze[0]; z[1] = gsGradeHaze[1]; z[2] = gsGradeHaze[2]; z[3] = gsGradeHaze[3];
+                        z[4] = gsGradeHaze[4]; z[5] = z[6] = z[7] = 0.0f;
                     }
                     SDL_PushGPUFragmentUniformData(cmd, 0, params, sizeof(params));
                     SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
@@ -1850,7 +1855,8 @@ static void vk_frame_end(void) {
                 SDL_GPUTextureSamplerBinding tsb;
                 SDL_GPUViewport vp;
                 SDL_GPURenderPass *pp;
-                float params[12] = {(float)(strength > 100 ? 100 : strength) / 100.0f, 0.35f, 0.35f, 0.6f, 0.25f, 0.25f, 0.72f, 0.0f,
+                float params[12] = {(float)(strength > 100 ? 100 : strength) / 100.0f, 0.35f, 0.35f, 0.6f, 0.25f, 0.25f, 0.72f,
+                                    Port_Setting("post_aa", 1) ? 1.0f : 0.0f, /* (27 Nov 2026: anti-aliasing, post.frag) */
                                     512.0f / (float)GS_W, 448.0f / (float)GS_H, 0.0f, 0.0f}; /* (the page in the larger buffer, as the copy's source) */
                 SDL_zero(ct);
                 ct.texture = swap;

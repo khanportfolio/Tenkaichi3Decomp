@@ -7,7 +7,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 2, binding = 0) uniform sampler2D img;
 layout(set = 3, binding = 0) uniform Params {
     vec4 a; // x: amount 0..1, y: glow, z: vignette, w: sharpen
-    vec4 b; // x: colour, y: contrast, z: glow threshold, w: unused
+    vec4 b; // x: colour, y: contrast, z: glow threshold, w: anti-aliasing (0 off, 1 on)
     vec4 c; // xy: the part of the buffer the picture fills (the buffer is larger than the 512 x 448 page)
 } p;
 
@@ -20,6 +20,25 @@ void main() {
     vec2 uv = vUv * p.c.xy;
     vec3 orig = at(uv);
     vec3 c = orig;
+    if (p.b.w > 0.5) {
+        // anti-aliasing (27 Nov 2026; after FXAA, T. Lottes 2009): where the brightness changes across an edge, the
+        // pixel is blended with its neighbours along the edge, so stair steps become smooth lines
+        const vec3 kL = vec3(0.299, 0.587, 0.114);
+        float lNW = dot(at(uv + vec2(-1.0, -1.0) * tx), kL), lNE = dot(at(uv + vec2(1.0, -1.0) * tx), kL);
+        float lSW = dot(at(uv + vec2(-1.0, 1.0) * tx), kL), lSE = dot(at(uv + vec2(1.0, 1.0) * tx), kL);
+        float lM = dot(orig, kL);
+        float lo = min(lM, min(min(lNW, lNE), min(lSW, lSE))), hi = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+        if (hi - lo > max(0.0312, hi * 0.125)) {
+            vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
+            float red = max((lNW + lNE + lSW + lSE) * 0.25 * 0.125, 1.0 / 128.0);
+            dir = clamp(dir / (min(abs(dir.x), abs(dir.y)) + red), vec2(-8.0), vec2(8.0)) * tx;
+            vec3 a2 = 0.5 * (at(uv + dir * (1.0 / 3.0 - 0.5)) + at(uv + dir * (2.0 / 3.0 - 0.5)));
+            vec3 b4 = a2 * 0.5 + 0.25 * (at(uv - dir * 0.5) + at(uv + dir * 0.5));
+            float lB = dot(b4, kL);
+            c = (lB < lo || lB > hi) ? a2 : b4;
+            orig = c;
+        }
+    }
 
     // sharpen, weighted down where the neighbourhood already has strong contrast (so edges do not ring)
     vec3 n = at(uv - vec2(0.0, tx.y)), s = at(uv + vec2(0.0, tx.y));

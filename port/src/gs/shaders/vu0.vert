@@ -54,9 +54,10 @@ void main() {
         // turns away from the camera, more on the side facing the light. light2: its colour (0..255) and strength.
         vec3 n = normalize(mix(mat3(u.boneB) * inNormal.xyz, mat3(u.boneA) * inNormal.xyz, w));
         vec3 fwd = normalize(vec3(u.screen[0][3], u.screen[1][3], u.screen[2][3])); // (the camera's forward: the w row)
-        float edge = pow(clamp(1.0 - abs(dot(n, fwd)), 0.0, 1.0), 2.6);
-        float lit = length(u.light.xyz) > 0.0 ? clamp(dot(n, normalize(u.light.xyz)), 0.0, 1.0) : 0.5;
-        float a = clamp(edge * (0.35 + 0.65 * lit) * u.light2.w, 0.0, 1.0);
+        // (27 Nov 2026: steady. It no longer follows the game's light, which shifts a little every frame and made the
+        // edge jump on and off (the user saw the bodies flicker); a softer rise, so a small turn changes it a little)
+        float edge = smoothstep(0.45, 1.0, clamp(1.0 - abs(dot(n, fwd)), 0.0, 1.0));
+        float a = clamp(edge * edge * 0.8 * u.light2.w, 0.0, 1.0);
         vColor = vec4(u.light2.rgb / 255.0, a * 128.0 / 255.0); // (alpha as the GS has it: 0x80 = 1)
         vStq = vec3(0.0, 0.0, 1.0);
     } else if (u.misc.w >= 3.0) {

@@ -811,6 +811,23 @@ static int l_look(lua_State *L) {
             }
             lua_pop(L, 1);
         }
+        lua_getfield(L, 1, "haze");
+        if (!lua_isnil(L, -1)) {
+            lua_Number v = luaL_checknumber(L, -1);
+            sLookBuild.haze = !(v > 0) ? 0 : v > 100 ? 100 : (int)(v + 0.5);
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "haze_start");
+        if (!lua_isnil(L, -1)) {
+            lua_Number v = luaL_checknumber(L, -1);
+            sLookBuild.haze_start = !(v > 0) ? 0 : v > 999 ? 999 : (int)(v + 0.5);
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 1, "haze_color");
+        if (!lua_isnil(L, -1)) {
+            sLookBuild.haze_color = (unsigned)luaL_checkinteger(L, -1);
+        }
+        lua_pop(L, 1);
         lua_getfield(L, 1, "shadow_tint");
         if (lua_istable(L, -1)) {
             for (k = 0; k < 3; k++) {

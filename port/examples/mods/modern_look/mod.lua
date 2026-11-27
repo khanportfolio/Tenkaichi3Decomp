@@ -8,6 +8,7 @@
 --   - ambient shadows: soft shadows in creases and where rocks and fighters meet the ground;
 --   - brighter energy: ki blasts, beams and sparks stronger and more saturated;
 --   - energy light: that light tinting the ground, the rocks and the fighters round it.
+--   - atmosphere: what is far fades softly into the air, in each stage's own colour;
 --   - map looks (27 Nov 2026): each of the game's stages its own colours, as an anime colourist would set them:
 --     clear and crisp at noon, the sunset's warmth kept in the evening, cool deep blue at night, Namek's green,
 --     the glacier icy, Hell and Dying Namek dramatic, Ruined Earth grey and harsh.
@@ -24,33 +25,47 @@ local RIM_COLOURS = {
 
 -- By stage number (game.stage, the game's stage list): percentages of the vivid colours' own values (saturation,
 -- vibrance, contrast, balance: how much of the scene's colour cast is taken out) and the shadows' tint {r, g, b}.
-local NOON = { saturation = 110, contrast = 110 }
-local EVENING = { saturation = 115, vibrance = 115, balance = 35, shadow_tint = { -0.1, -0.35, 0.7 } }
-local NIGHT = { saturation = 95, contrast = 115, balance = 60, shadow_tint = { -0.5, -0.3, 1.0 } }
+local NOON = { saturation = 100, contrast = 105, balance = 140,                   -- (27 Nov: neutral, no orange cast)
+               haze = 30, haze_start = 900, haze_color = 0xCFE3F5FF }
+local EVENING = { saturation = 115, vibrance = 115, balance = 35, shadow_tint = { -0.1, -0.35, 0.7 },
+                  haze = 35, haze_start = 900, haze_color = 0xF0C3A6FF }
+local NIGHT = { saturation = 100, contrast = 85, balance = 40, shadow_tint = { -0.3, -0.15, 0.6 },  -- (115 crushed the ground)
+                haze = 35, haze_start = 900, haze_color = 0x1E2A4AFF }
+local function with(base, extra)
+    local t = {}
+    for k, v in pairs(base) do t[k] = v end
+    for k, v in pairs(extra) do t[k] = v end
+    return t
+end
 local MAP_LOOKS = {
     [0] = NOON,                                                                        -- Wasteland - Noon
     [1] = NOON,                                                                        -- Rocky Area - Noon
-    [2] = { saturation = 115, vibrance = 120, balance = 55, shadow_tint = { -0.5, 0.1, 0.6 } },   -- Planet Namek
-    [3] = { saturation = 110, contrast = 125, balance = 25, shadow_tint = { 0.2, -0.5, 0.3 } },   -- Dying Namek
+    [2] = { saturation = 85, vibrance = 60, balance = 55, shadow_tint = { -0.5, 0.1, 0.6 },       -- Planet Namek
+            haze = 30, haze_start = 900, haze_color = 0xBDEBD3FF },
+    [3] = { saturation = 110, contrast = 125, balance = 25, shadow_tint = { 0.2, -0.5, 0.3 },     -- Dying Namek
+            haze = 35, haze_start = 880, haze_color = 0x8A3A3AFF },
     [4] = NOON,                                                                        -- World Tournament - Noon
-    [5] = { saturation = 110, contrast = 105, vibrance = 115 },                        -- Kami's Lookout
+    [5] = with(NOON, { vibrance = 115, haze_color = 0xE3EEFAFF }),                     -- Kami's Lookout
     [6] = EVENING,                                                                     -- Cell Games Arena - Evening
-    [7] = { saturation = 120, vibrance = 130 },                                        -- Supreme Kai's World
+    [7] = { saturation = 110, vibrance = 120, haze = 25, haze_start = 900, haze_color = 0xD9E8D0FF }, -- Supreme Kai's World
     [8] = { saturation = 90, contrast = 115, balance = 100 },                          -- Hyperbolic Time Chamber
     [9] = NOON,                                                                        -- City Ruins - Noon
     [10] = NOON,                                                                       -- Mountain Road - Noon
-    [11] = { saturation = 120, vibrance = 135, contrast = 105 },                       -- Islands
-    [12] = { saturation = 120, vibrance = 135, contrast = 105 },                       -- Kame House
+    [11] = with(NOON, { saturation = 115, vibrance = 125, haze_color = 0xCFEAF7FF }),  -- Islands
+    [12] = with(NOON, { saturation = 115, vibrance = 125, haze_color = 0xCFEAF7FF }),  -- Kame House
     [13] = NIGHT,                                                                      -- Planet - Night
-    [14] = { saturation = 105, contrast = 110, shadow_tint = { -0.6, -0.1, 1.0 } },   -- Glacier
-    [15] = { saturation = 85, contrast = 120, balance = 80 },                          -- Ruined Earth
+    [14] = { saturation = 100, contrast = 110, shadow_tint = { -0.6, -0.1, 1.0 },      -- Glacier
+             haze = 40, haze_start = 880, haze_color = 0xDCEBFAFF },
+    [15] = { saturation = 85, contrast = 120, balance = 80, haze = 35, haze_start = 880, haze_color = 0x8C8478FF }, -- Ruined Earth
     [16] = { saturation = 110, contrast = 120, balance = 30 },                         -- Outer Space
-    [17] = { saturation = 115, vibrance = 125 },                                       -- Penguin Village
-    [18] = { saturation = 110, contrast = 115, balance = 30, shadow_tint = { 0.3, -0.4, 0.4 } },  -- Hell
-    [19] = { saturation = 100, contrast = 110, balance = 140 },                        -- Desert - Noon
+    [17] = with(NOON, { saturation = 110, vibrance = 120 }),                           -- Penguin Village
+    [18] = { saturation = 110, contrast = 115, balance = 30, shadow_tint = { 0.3, -0.4, 0.4 },    -- Hell
+             haze = 30, haze_start = 900, haze_color = 0x7A2E22FF },
+    [19] = with(NOON, { balance = 160, haze_color = 0xEFE0C4FF }),                     -- Desert - Noon
     [20] = NOON,                                                                       -- King's Castle
-    [21] = { saturation = 105, contrast = 110, shadow_tint = { -0.6, -0.1, 1.0 } },   -- Muscle Tower (snow)
-    [22] = { saturation = 115, vibrance = 125 },                                       -- Mount Paozu
+    [21] = { saturation = 100, contrast = 110, shadow_tint = { -0.6, -0.1, 1.0 },      -- Muscle Tower (snow)
+             haze = 40, haze_start = 880, haze_color = 0xDCEBFAFF },
+    [22] = with(NOON, { saturation = 110, vibrance = 120 }),                           -- Mount Paozu
     [23] = EVENING, [25] = EVENING, [27] = EVENING, [29] = EVENING, [31] = EVENING, [33] = EVENING, [34] = EVENING,
     [24] = NIGHT, [26] = NIGHT, [30] = NIGHT, [32] = NIGHT,
     [28] = NOON,                                                                       -- Cell Game - Noon
@@ -62,7 +77,7 @@ end
 
 return {
     name = "Modern look",
-    version = "1.1",
+    version = "1.2",
     author = "BT4decomp",
     description = "Anime shading, rim light, vivid colours, ambient shadows and glowing energy.",
     settings = {
@@ -76,15 +91,20 @@ return {
         slider("energy_light", "Energy light", 0, "Energy lights up the ground and fighters round it (GPU renderer)."),
         { id = "map_looks", label = "Map looks", type = "toggle", default = true,
           tip = "Each stage its own colours: crisp noon, warm evening, deep blue night (GPU renderer)." },
+        { id = "atmosphere", label = "Atmosphere", type = "toggle", default = true,
+          tip = "Distant scenery fades softly into the air, each stage in its own colour (GPU renderer)." },
     },
 
     -- Asked every blank: switching the mod off (F1 > Mods) gives the game's own picture back at once.
     on_frame = function(game)
         local m = bt3.setting("map_looks") and game.stage and MAP_LOOKS[game.stage]
         if m then
+            local air = bt3.setting("atmosphere")
             bt3.look {
                 saturation = m.saturation, vibrance = m.vibrance, contrast = m.contrast, balance = m.balance,
                 shadow_tint = m.shadow_tint,
+                haze = air and m.haze or nil, haze_start = air and m.haze_start or nil,
+                haze_color = air and m.haze_color or nil,
             }
         end
         bt3.look {

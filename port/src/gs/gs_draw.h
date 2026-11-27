@@ -74,6 +74,7 @@ extern float gsZMax; /* gs_draw.c */
 #define GS_LIGHT_SETS 8
 typedef struct GsLight { float x, y, rad, z, r, g, b, w; } GsLight;
 extern GsLight gsGradeLights[GS_LIGHT_SETS][GS_LIGHTS];
+extern float gsGradeHaze[5]; /* the look's atmosphere: strength, start, r, g, b (gs_draw.c grade_add) */
 extern int gsGradeLightCount[GS_LIGHT_SETS];
 
 typedef struct GsDraw {

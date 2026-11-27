@@ -3095,13 +3095,19 @@ void GsGpu_FbUpload(int second) {
 
 /* A script mod's vivid colours, ambient shadows and energy light (bt3.look): native effect 6, a pass over the fight's
    picture before its HUD (shaders/grade.frag); only the back end of SDL's GPU API draws it (gs_gpu.c). */
+float gsGradeHaze[5];
 static void grade_add(void) {
     const ModsLook *lk = Mods_Look();
     GsDraw g;
     float k = lk->vivid / 100.0f;
     int ls;
 
-    if ((lk->vivid <= 0 && lk->ambient <= 0 && lk->energy_light <= 0) || sBackend != &sVulkanBackend ||
+    gsGradeHaze[0] = lk->haze / 100.0f; /* (atmosphere: strength, where it starts, its colour; gs_gpu.c reads it) */
+    gsGradeHaze[1] = lk->haze_start > 0 ? lk->haze_start / 1000.0f : 0.9f;
+    gsGradeHaze[2] = (float)(lk->haze_color >> 24 & 0xFF) / 255.0f;
+    gsGradeHaze[3] = (float)(lk->haze_color >> 16 & 0xFF) / 255.0f;
+    gsGradeHaze[4] = (float)(lk->haze_color >> 8 & 0xFF) / 255.0f;
+    if ((lk->vivid <= 0 && lk->ambient <= 0 && lk->energy_light <= 0 && lk->haze <= 0) || sBackend != &sVulkanBackend ||
         sGradeFrame == gGsFrame || gsDrawCount >= MAX_DRAWS || gGsMainFbp < 0) {
         return;
     }

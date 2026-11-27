@@ -189,6 +189,7 @@ steps. Up to 24 settings, 8 choices each.
 | `vivid` | livelier colours (dull ones more, skin and sand less), a little more contrast, cool shadows; part of the stage's colour cast taken out, followed slowly so a flash does not swing it |
 | `saturation`, `vibrance`, `contrast`, `balance` | a stage's own look: percent (1..300) of the vivid colours' own saturation, vibrance, contrast and colour-cast removal; the last mod asking wins |
 | `shadow_tint` | `{r, g, b}` (-1..1 each): the shadows' tint instead of the vivid colours' blue-violet |
+| `haze`, `haze_start`, `haze_color` | atmosphere: distant scenery fades into the air colour (0xRRGGBBAA); strength 0..100, start in per mille of the game's depth range from the camera (default 900) |
 | `ambient` | soft shadows in creases and where things meet the ground, from the depth buffer |
 | `energy` | what adds light (ki blasts, beams, sparks, flashes) drawn stronger and more saturated |
 | `energy_light` | that light tinting the ground, rocks and fighters round it |
