@@ -799,6 +799,31 @@ static int l_look(lua_State *L) {
         sLookBuild.rim_color = (unsigned)luaL_checkinteger(L, -1);
     }
     lua_pop(L, 1);
+    {   /* a stage's own look: saturation, vibrance, contrast, balance (percent of the vivid colours' own, 1..300;
+           the last mod asking wins) and shadow_tint = {r, g, b} (-1..1 each) */
+        static const char *const pk[] = {"saturation", "vibrance", "contrast", "balance"};
+        int *const po[] = {&sLookBuild.saturation, &sLookBuild.vibrance, &sLookBuild.contrast, &sLookBuild.balance};
+        for (k = 0; k < 4; k++) {
+            lua_getfield(L, 1, pk[k]);
+            if (!lua_isnil(L, -1)) {
+                lua_Number v = luaL_checknumber(L, -1);
+                *po[k] = !(v > 1) ? 1 : v > 300 ? 300 : (int)(v + 0.5);
+            }
+            lua_pop(L, 1);
+        }
+        lua_getfield(L, 1, "shadow_tint");
+        if (lua_istable(L, -1)) {
+            for (k = 0; k < 3; k++) {
+                lua_Number v;
+                lua_rawgeti(L, -1, k + 1);
+                v = lua_isnumber(L, -1) ? lua_tonumber(L, -1) : 0.0;
+                sLookBuild.shadow_tint[k] = !(v > -1.0) ? -1.0f : v > 1.0 ? 1.0f : (float)v;
+                lua_pop(L, 1);
+            }
+            sLookBuild.tint_set = 1;
+        }
+        lua_pop(L, 1);
+    }
     return 0;
 }
 
@@ -921,6 +946,10 @@ static void push_game(lua_State *L, const FpState *fp, const ModsGame *g) {
     }
     set_bool(L, "split", g->split);
     set_bool(L, "swapped", Port_HudSwap());
+    if (fp->battle && g->battle) { /* (27 Nov 2026) the stage being fought on: its number in the stage list */
+        extern int Battle_GetStage(void);
+        set_int(L, "stage", Battle_GetStage());
+    }
     if (fp->battle && fp->timerSet) {
         lua_createtable(L, 0, 2);
         set_int(L, "value", fp->timer);

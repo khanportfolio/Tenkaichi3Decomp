@@ -119,6 +119,10 @@ int Mods_HudHidden(void);                     /* any thread: the game's HUD piec
 typedef struct ModsLook {
     int shading, rim, vivid, ambient, energy, energy_light;
     unsigned rim_color;
+    /* 27 Nov 2026: a stage's own look (modern_look's table per stage): percentages of the vivid colours' own values,
+       0 = not asked (100). shadow_tint: the shadows' tint (r, g, b, each -1..1) when tint_set. */
+    int saturation, vibrance, contrast, balance, tint_set;
+    float shadow_tint[3];
 } ModsLook;
 const ModsLook *Mods_Look(void);
 

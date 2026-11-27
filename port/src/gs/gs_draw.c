@@ -2854,6 +2854,10 @@ static void grade_add(void) {
     g.misc[0] = 1.0f + 0.30f * k;            /* saturation */
     g.misc[1] = 0.35f * k;                   /* vibrance */
     g.misc[2] = 1.0f + 0.10f * k;            /* contrast */
+    /* a stage's own look (bt3.look saturation, vibrance, contrast: percent of these; 0 = not asked) */
+    if (lk->saturation > 0) { g.misc[0] = 1.0f + (g.misc[0] - 1.0f) * lk->saturation / 100.0f + (lk->saturation - 100) / 400.0f; }
+    if (lk->vibrance > 0) { g.misc[1] *= lk->vibrance / 100.0f; }
+    if (lk->contrast > 0) { g.misc[2] = 1.0f + (g.misc[2] - 1.0f) * lk->contrast / 100.0f + (lk->contrast - 100) / 500.0f; }
     g.misc[3] = lk->vivid > 0 ? 1.0f : 0.0f; /* strength (0: the colours as they are) */
     {   /* the ambient shadows: strength, and the ring they look in (10 PS2 pixels, as wide at any shape) */
         static int debug = -1;
@@ -2866,8 +2870,10 @@ static void grade_add(void) {
         g.blendc = (zpsm == 0 ? 4294967295.0f : zpsm == 1 ? 16777215.0f : 65535.0f) / 65536.0f; /* (depth's maximum) */
     }
     g.rect[0] = -0.4f; g.rect[1] = -0.2f; g.rect[2] = 0.9f; /* the shadows' tint: toward blue-violet */
+    if (lk->tint_set) { g.rect[0] = lk->shadow_tint[0]; g.rect[1] = lk->shadow_tint[1]; g.rect[2] = lk->shadow_tint[2]; }
     g.rect[3] = (float)Port_PageAspectMilli() / 1000.0f * 448.0f / 512.0f; /* a GS pixel's width over its height */
     g.mode[0] = lk->vivid / 2;  /* the balance: half of the scene's colour cast out, with the vivid colours */
+    if (lk->balance > 0) { g.mode[0] = g.mode[0] * lk->balance / 100 > 100 ? 100 : g.mode[0] * lk->balance / 100; }
     g.mode[1] = lk->energy_light;
     ls = sLightSet++ % GS_LIGHT_SETS; /* the frame's lights, as a set of their own for the pass */
     gsGradeLightCount[ls] = sLightFrame == gGsFrame ? sLightCount : 0;

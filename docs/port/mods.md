@@ -68,6 +68,7 @@ What every function is given about the game, read at the last blank:
 | `game.hud_shown` | the fight is on with its gauges shown (not during cut-scenes or menus) |
 | `game.online` | an online session |
 | `game.me` | online: the side this copy plays (1 or 2); not set offline |
+| `game.stage` | in a fight: the stage's number in the game's stage list (0 Wasteland - Noon ... 34 Planet - Evening; added stages after) |
 | `game.split` | split-screen layout |
 | `game.swapped` | this copy shows the HUD's sides swapped (an online match seen from player 2's side) |
 | `game.time` | seconds on the computer's clock, for animations |
@@ -186,6 +187,8 @@ steps. Up to 24 settings, 8 choices each.
 | `shading` | the fighters' two-tone shading redrawn: cool coloured shadows (toward blue-violet, not too dark) with a soft, short edge, the lit side a little livelier; the colours stay each fighter's |
 | `rim`, `rim_color` | light along the fighters' silhouettes, stronger on the side facing the light, in `rim_color` (`0xRRGGBBAA`, alpha unused; default a warm white) |
 | `vivid` | livelier colours (dull ones more, skin and sand less), a little more contrast, cool shadows; part of the stage's colour cast taken out, followed slowly so a flash does not swing it |
+| `saturation`, `vibrance`, `contrast`, `balance` | a stage's own look: percent (1..300) of the vivid colours' own saturation, vibrance, contrast and colour-cast removal; the last mod asking wins |
+| `shadow_tint` | `{r, g, b}` (-1..1 each): the shadows' tint instead of the vivid colours' blue-violet |
 | `ambient` | soft shadows in creases and where things meet the ground, from the depth buffer |
 | `energy` | what adds light (ki blasts, beams, sparks, flashes) drawn stronger and more saturated |
 | `energy_light` | that light tinting the ground, rocks and fighters round it |
