@@ -33,6 +33,7 @@ int TexPack_Get(int id, TexPackImage *img);
 int TexPack_IsBackdrop(int id);
 /* 1 when replacement `id` holds palette indices (R, G and B's share of G) to colour with the texture's palette now. */
 int TexPack_IsIndexed(int id);
+const char *TexPack_LastName(void); /* the name the last paletted lookup needed ("" if none) */
 /* Its sound (backdrop.txt "audio <file>": an mp3, wav or flac played in a loop while the backdrop is shown, the
    game's music silent meanwhile), or NULL. */
 const char *TexPack_BackdropAudio(int id);

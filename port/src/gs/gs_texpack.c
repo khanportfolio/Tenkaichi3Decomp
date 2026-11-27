@@ -264,6 +264,11 @@ const char *TexPack_Path(int id) {
     return id >= 0 && (uint32_t)id < sCount ? sEntries[id].path : NULL;
 }
 
+/* 28 Nov 2026: the name the last paletted lookup needed (for BT3_TEX_DUMP: each missing texture saved under the
+   name its replacement must have, so HD versions can be made of what a fight really draws) */
+static char sLastName[96];
+const char *TexPack_LastName(void) { return sLastName; }
+
 int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32_t th, uint32_t tcc, uint32_t cbp, uint32_t cpsm, uint32_t *maxAlpha) {
     uint32_t bw, bh, x, y, i, lo = 255, hi = 0, bits, wl = 0, hl = 0;
     XXH3_state_t st;
@@ -271,6 +276,7 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
     int pal = psm == 0x13 || psm == 0x14;
 
     *maxAlpha = 255;
+    sLastName[0] = 0;
     if (sCount == 0) {
         return -1;
     }
@@ -334,6 +340,8 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
         if (id < 0) {
             id = find(tex, 0, bits, 0); /* an indexed replacement (TexPack_IsIndexed): any palette */
         }
+        snprintf(sLastName, sizeof(sLastName), "%llx-%llx-%08x", (unsigned long long)tex,
+                 (unsigned long long)XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits);
         if (getenv("BT3_TEX_LOG") != NULL) { /* which textures a pack has and which it has not, by the name it would need */
             fprintf(stderr, "texpack: %s %ux%u %u-bit %llx-%llx-%08x%s%s\n", id >= 0 ? "found  " : "missing", tw, th, psm == 0x13 ? 8u : 4u,
                     (unsigned long long)tex, (unsigned long long)XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, id >= 0 ? " " : "",

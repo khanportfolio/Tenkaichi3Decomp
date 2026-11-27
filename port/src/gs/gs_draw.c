@@ -1381,8 +1381,15 @@ static GsTex texture_get(int ctx) {
             static unsigned n;
             char name[600];
             FILE *df;
-            snprintf(name, sizeof(name), "%s/tex_%05u_f%06u_%ux%u.rgba", env_once("BT3_TEX_DUMP"), n++, gGsFrame, (unsigned)rw, (unsigned)rh);
-            df = fopen(name, "wb");
+            const char *pn = sTexPackOn && TexPack_Count() != 0 ? TexPack_LastName() : "";
+            if (pn[0] != 0) { /* (a paletted texture: by the name an HD replacement needs, once) */
+                snprintf(name, sizeof(name), "%s/%s_%ux%u.rgba", env_once("BT3_TEX_DUMP"), pn, (unsigned)rw, (unsigned)rh);
+                df = fopen(name, "rb");
+                if (df != NULL) { fclose(df); name[0] = 0; }
+            } else {
+                snprintf(name, sizeof(name), "%s/tex_%05u_f%06u_%ux%u.rgba", env_once("BT3_TEX_DUMP"), n++, gGsFrame, (unsigned)rw, (unsigned)rh);
+            }
+            df = name[0] != 0 ? fopen(name, "wb") : NULL;
             if (df != NULL) {
                 fwrite(px, 1, (size_t)rw * rh * 4, df);
                 fclose(df);
