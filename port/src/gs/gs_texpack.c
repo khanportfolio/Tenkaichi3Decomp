@@ -342,6 +342,27 @@ int TexPack_Lookup(uint32_t tbp, uint32_t tbw, uint32_t psm, uint32_t tw, uint32
         }
         snprintf(sLastName, sizeof(sLastName), "%llx-%llx-%08x", (unsigned long long)tex,
                  (unsigned long long)XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits);
+        if (id < 0 && getenv("BT3_TEX_DUMP") != NULL) {
+            /* 28 Nov 2026: a texture no pack has, saved once as raw RGBA (the GS's alpha, 0x80 opaque) under the name
+               its replacement needs: <dir>/<name>_<w>x<h>.rgba, for HD versions of what a fight really draws */
+            char path[700];
+            FILE *df;
+            snprintf(path, sizeof(path), "%s/%s_%ux%u.rgba", getenv("BT3_TEX_DUMP"), sLastName, tw, th);
+            df = fopen(path, "rb");
+            if (df != NULL) {
+                fclose(df);
+            } else if ((df = fopen(path, "wb")) != NULL) {
+                uint32_t mask = psm == 0x13 ? 0xFFu : 0x0Fu;
+                for (y = 0; y < th; y++) {
+                    for (x = 0; x < tw; x++) {
+                        uint32_t c = Gs_Expand(clut[Gs_VramRead(tbp, tbw, psm, x, y) & mask], cpsm);
+                        uint8_t px[4] = {(uint8_t)c, (uint8_t)(c >> 8), (uint8_t)(c >> 16), (uint8_t)(c >> 24)};
+                        fwrite(px, 1, 4, df);
+                    }
+                }
+                fclose(df);
+            }
+        }
         if (getenv("BT3_TEX_LOG") != NULL) { /* which textures a pack has and which it has not, by the name it would need */
             fprintf(stderr, "texpack: %s %ux%u %u-bit %llx-%llx-%08x%s%s\n", id >= 0 ? "found  " : "missing", tw, th, psm == 0x13 ? 8u : 4u,
                     (unsigned long long)tex, (unsigned long long)XXH3_64bits(&clut[lo], (hi - lo + 1) * 4), bits, id >= 0 ? " " : "",
