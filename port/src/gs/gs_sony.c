@@ -69,6 +69,12 @@ int sceGsPutDrawEnv(uint64_t *giftag) {
 
 int sceGsSwapDBuff(void *p, int id) {
     DBuff *db = p;
+    extern void Gs_RenderIdle(void);
+    /* (28 Nov 2026) with the render thread, the frame before is still being drawn into the other buffer: it is
+       finished first (the draw environment below waits for it anyway), and only then is the new buffer named. Named
+       before, that frame's look pass, rim light and choice of picture to show read the new buffer while drawing the
+       old one, so about one picture in four went out without them: the whole picture flickered. */
+    Gs_RenderIdle();
     /* the buffer this frame is drawn into: what the renderer shows when the frame is finished */
     gGsMainFbp = (int)(((id & 1) ? db->draw1.frame.v : db->draw0.frame.v) & 0x1FF);
     return sceGsPutDrawEnv((id & 1) ? db->giftag1 : db->giftag0);
