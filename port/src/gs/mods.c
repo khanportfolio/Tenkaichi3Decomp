@@ -988,7 +988,9 @@ static void push_game(lua_State *L, const FpState *fp, const ModsGame *g) {
     }
     set_bool(L, "split", g->split);
     set_bool(L, "swapped", Port_HudSwap());
-    if (fp->battle && g->battle) { /* (27 Nov 2026) the stage being fought on: its number in the stage list */
+    if (g->battle) { /* (27 Nov 2026) the stage being fought on: its number in the stage list. (28 Nov: by the game's
+                        own state alone; the panels' copy can be missed for a blank with the render thread on, and the
+                        stage's look then went for that blank: the whole picture flickered) */
         extern int Battle_GetStage(void);
         set_int(L, "stage", Battle_GetStage());
     }
@@ -1504,8 +1506,18 @@ void Mods_Tick(void) {
         }
         return;
     }
-    if (!PortPanels_Read(&fp)) {
-        memset(&fp, 0, sizeof(fp));
+    {   /* the panels as the renderer last read them; a blank whose copy is missed (the render thread writing it just
+           then) keeps the one before, rather than none (28 Nov 2026: that blank's look went, a flicker) */
+        static FpState last;
+        static int have;
+        if (PortPanels_Read(&fp)) {
+            last = fp;
+            have = 1;
+        } else if (have) {
+            fp = last;
+        } else {
+            memset(&fp, 0, sizeof(fp));
+        }
     }
     PortMods_Read(&g);
     hud_begin();

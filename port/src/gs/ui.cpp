@@ -1626,14 +1626,14 @@ static void effects_tab(PortVideo &v) {
         bool aa = Port_Setting("post_aa", 1) != 0;
         if (ImGui::Checkbox("Anti-aliasing", &aa)) { Port_SettingSave("post_aa", aa ? 1 : 0); Port_SettingsWrite(); }
         ImGui::SetItemTooltip("Smooths the stair steps along edges (needs Picture finishing on).");
-        int bloom = Port_Setting("bloom", 100);
+        int bloom = Port_Setting("bloom", 0);
         if (ImGui::SliderInt("Cinematic glow", &bloom, 0, 200, bloom == 0 ? "Off" : "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
             Port_SettingSave("bloom", bloom);
             Port_SettingsWrite();
         }
         ImGui::SetItemTooltip("A wide soft glow of light around beams, blasts, auras and a Super Saiyan's hair, as in a\n"
                               "film. The open sky glows much less, so a bright day stays clear.");
-        bool rays = Port_Setting("sun_rays", 1) != 0;
+        bool rays = Port_Setting("sun_rays", 0) != 0;
         if (ImGui::Checkbox("Sun rays", &rays)) { Port_SettingSave("sun_rays", rays ? 1 : 0); Port_SettingsWrite(); }
         ImGui::SetItemTooltip("Shafts of light from the sky past the fighters and the scenery, in each stage's own light\n"
                               "(the Modern look mod's stage looks; none at night or indoors).");

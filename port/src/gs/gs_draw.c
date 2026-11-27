@@ -3124,12 +3124,12 @@ static void grade_add(void) {
     gsGradeHaze[4] = (float)(lk->haze_color >> 8 & 0xFF) / 255.0f;
     {   /* 28 Nov 2026: the cinematic glow (F1 > Effects, `bloom` percent, 100 the default) and the sun rays (`sun_rays`
            on / off; how strong, from where and in what colour: the stage's look) */
-        int bloom = Port_Setting("bloom", 100);
+        int bloom = Port_Setting("bloom", 0); /* (off unless asked: it washed out open stages) */
         unsigned sc = lk->sun_color != 0 ? lk->sun_color : 0xFFF0D2FFu;
         bloom = bloom < 0 ? 0 : bloom > 200 ? 200 : bloom;
         gsGradeFx[0] = bloom / 100.0f * 1.4f;                      /* strength */
         gsGradeFx[1] = 0.62f;                                      /* threshold (of whiteness) */
-        gsGradeFx[2] = Port_Setting("sun_rays", 1) ? lk->sun_rays / 100.0f : 0.0f;
+        gsGradeFx[2] = Port_Setting("sun_rays", 0) ? lk->sun_rays / 100.0f : 0.0f;
         gsGradeFx[3] = (lk->sun_set ? lk->sun_x : 62) / 100.0f;    /* (of the picture) */
         gsGradeFx[4] = (lk->sun_set ? lk->sun_y : -10) / 100.0f;
         gsGradeFx[5] = (float)(sc >> 24 & 0xFF) / 255.0f;

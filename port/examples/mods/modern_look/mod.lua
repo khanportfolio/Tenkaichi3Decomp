@@ -30,13 +30,13 @@ local RIM_COLOURS = {
 -- its colour; F1 > Effects > Sun rays switches them off). None indoors, in space or in Hell.
 local NOON = { saturation = 100, contrast = 105, balance = 140,                   -- (27 Nov: neutral, no orange cast)
                haze = 45, haze_start = 650, haze_color = 0xCFE3F5FF,
-               sun_rays = 55, sun_x = 65, sun_y = -15, sun_color = 0xFFF4DCFF }  -- (high, warm white)
+               sun_rays = 0, sun_x = 65, sun_y = -15, sun_color = 0xFFF4DCFF }  -- (high, warm white)
 local EVENING = { saturation = 115, vibrance = 115, balance = 35, shadow_tint = { -0.1, -0.35, 0.7 },
                   haze = 50, haze_start = 650, haze_color = 0xF0C3A6FF,
-                  sun_rays = 70, sun_x = 75, sun_y = 5, sun_color = 0xFFB878FF }         -- (low, orange)
+                  sun_rays = 0, sun_x = 75, sun_y = 5, sun_color = 0xFFB878FF }         -- (low, orange)
 local NIGHT = { saturation = 100, contrast = 85, balance = 40, shadow_tint = { -0.3, -0.15, 0.6 },  -- (115 crushed the ground)
                 haze = 50, haze_start = 650, haze_color = 0x1E2A4AFF,
-                sun_rays = 15, sun_x = 30, sun_y = -15, sun_color = 0x9DB8FFFF }       -- (faint moonlight)
+                sun_rays = 0, sun_x = 30, sun_y = -15, sun_color = 0x9DB8FFFF }       -- (faint moonlight)
 local function with(base, extra)
     local t = {}
     for k, v in pairs(base) do t[k] = v end
@@ -47,7 +47,7 @@ local MAP_LOOKS = {
     [0] = NOON,                                                                        -- Wasteland - Noon
     [1] = NOON,                                                                        -- Rocky Area - Noon
     [2] = { saturation = 85, vibrance = 60, balance = 55, shadow_tint = { -0.5, 0.1, 0.6 },       -- Planet Namek
-            haze = 45, haze_start = 650, haze_color = 0xBDEBD3FF, sun_rays = 40, sun_color = 0xE6FFE8FF },
+            haze = 45, haze_start = 650, haze_color = 0xBDEBD3FF, sun_rays = 0, sun_color = 0xE6FFE8FF },
     [3] = { saturation = 110, contrast = 125, balance = 25, shadow_tint = { 0.2, -0.5, 0.3 },     -- Dying Namek
             haze = 50, haze_start = 600, haze_color = 0x8A3A3AFF },
     [4] = NOON,                                                                        -- World Tournament - Noon
@@ -61,7 +61,7 @@ local MAP_LOOKS = {
     [12] = with(NOON, { saturation = 115, vibrance = 125, haze_color = 0xCFEAF7FF }),  -- Kame House
     [13] = NIGHT,                                                                      -- Planet - Night
     [14] = { saturation = 100, contrast = 110, shadow_tint = { -0.6, -0.1, 1.0 },      -- Glacier
-             haze = 55, haze_start = 600, haze_color = 0xDCEBFAFF, sun_rays = 40, sun_color = 0xF2F8FFFF },
+             haze = 55, haze_start = 600, haze_color = 0xDCEBFAFF, sun_rays = 0, sun_color = 0xF2F8FFFF },
     [15] = { saturation = 85, contrast = 120, balance = 80, haze = 50, haze_start = 600, haze_color = 0x8C8478FF }, -- Ruined Earth
     [16] = { saturation = 110, contrast = 120, balance = 30 },                         -- Outer Space
     [17] = with(NOON, { saturation = 110, vibrance = 120 }),                           -- Penguin Village
