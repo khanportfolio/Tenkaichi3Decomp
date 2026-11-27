@@ -1105,6 +1105,55 @@ static int pipe_no_aux(int p) {
     return sPipes[p].noAux - 1;
 }
 
+/* The pipeline draw `n` uses, with the alpha bytes kept where they are read later and left alone elsewhere
+   (aux_plan); *split = 1 when it is drawn in two parts for that. */
+static int draw_pipe(uint32_t n, int *split) {
+    const GsDraw *d = &gsDraws[n];
+    int pipe = (int)d->pipeline;
+    *split = 0;
+    if (aux_plan_on() && (sPipes[pipe].key >> 16 & SDL_GPU_COLORCOMPONENT_A)) {
+        const int16_t *r = sAuxNeed[n];
+        if (r[2] <= r[0]) {
+            pipe = pipe_no_aux(pipe);
+        } else if (!d->vu && (r[0] > d->scissor[0] || r[1] > d->scissor[1] || r[2] < d->scissor[0] + d->scissor[2] ||
+                              r[3] < d->scissor[1] + d->scissor[3]) && pipe_no_aux(pipe) != pipe) {
+            *split = 1; /* (a vertex program's draw is not split: its vertices would be worked out again) */
+        }
+    }
+    return pipe;
+}
+
+/* (28 Nov 2026, the user: 60 constant at 4x) Joining draws: a frame has ~3,200, and each call costs the processor
+   ~1.7 us in the library and the driver (5-6 ms a frame, measured). Draw `m` joins the run that started with `d`
+   (`count` vertices or indices so far, drawn with pipeline `pipe`) when it is drawn exactly the same way and its
+   vertices follow on. BT3_DRAW_MERGE=0: each draw on its own (to compare). */
+static unsigned sMerged; /* (draws joined to the one before, for BT3_GS_VERBOSE) */
+static int merge_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        on = (getenv("BT3_DRAW_MERGE") == NULL || atoi(getenv("BT3_DRAW_MERGE")) != 0) && getenv("BT3_FX_SKIP") == NULL &&
+             getenv("BT3_FX_STAT") == NULL;
+    }
+    return on;
+}
+static int draw_joins(const GsDraw *d, uint32_t m, int pipe, uint32_t count) {
+    const GsDraw *e = &gsDraws[m];
+    float z;
+    int split;
+    if (e->native || e->vu != d->vu || e->first != d->first + count || e->target != d->target || e->pipeline != d->pipeline ||
+        e->tex != d->tex || e->tex_is_target != d->tex_is_target || e->sampler != d->sampler || e->src != d->src ||
+        e->wall != d->wall || e->blendc != d->blendc || (d->vu && e->uniform != d->uniform) ||
+        memcmp(e->mode, d->mode, sizeof(d->mode)) != 0 || memcmp(e->misc, d->misc, sizeof(d->misc)) != 0 ||
+        memcmp(e->rect, d->rect, sizeof(d->rect)) != 0 || memcmp(e->orig, d->orig, sizeof(d->orig)) != 0 ||
+        memcmp(e->scissor, d->scissor, sizeof(d->scissor)) != 0) {
+        return 0;
+    }
+    if (draw_pipe(m, &split) != pipe || split || clear_draw(e, &z)) {
+        return 0;
+    }
+    return 1;
+}
+
 static void vk_frame_end(void) {
     fx_frame();
     SDL_GPUCommandBuffer *cmd;
@@ -1121,7 +1170,7 @@ static void vk_frame_end(void) {
     struct { int32_t mode[4]; float misc[4]; float rect[4]; float orig[4]; float extra[4]; } lastFu;
     int lastScissor[4];
     float lastBlend = -1.0f;
-    uint32_t n;
+    uint32_t n, runCount;
 
     GsGpu_TitlePoll();
     if (sVsyncPending >= 0) {
@@ -1766,17 +1815,7 @@ static void vk_frame_end(void) {
             lastUni = (int)d->uniform;
         }
         /* the alpha bytes: kept where they are read later, left alone elsewhere (aux_plan) */
-        pipe = (int)d->pipeline;
-        split = 0;
-        if (aux_plan_on() && (sPipes[pipe].key >> 16 & SDL_GPU_COLORCOMPONENT_A)) {
-            const int16_t *r = sAuxNeed[n];
-            if (r[2] <= r[0]) {
-                pipe = pipe_no_aux(pipe);
-            } else if (!d->vu && (r[0] > d->scissor[0] || r[1] > d->scissor[1] || r[2] < d->scissor[0] + d->scissor[2] ||
-                                  r[3] < d->scissor[1] + d->scissor[3]) && pipe_no_aux(pipe) != pipe) {
-                split = 1; /* (a vertex program's draw is not split: its vertices would be worked out again) */
-            }
-        }
+        pipe = draw_pipe(n, &split);
         if (pipe != lastPipe) {
             SDL_BindGPUGraphicsPipeline(pass, sPipes[pipe].p);
             lastPipe = pipe;
@@ -1817,8 +1856,18 @@ static void vk_frame_end(void) {
         if (fx_measure(d)) {
             continue;
         }
+        runCount = d->count;
+        if (!split && merge_on()) {
+            /* (28 Nov 2026) the draws after it that differ in nothing and continue its vertices: one call for all
+               (every pipeline draws lists, so joined ranges draw exactly the same triangles, in the same order) */
+            while (n + 1 < gsDrawCount && draw_joins(d, n + 1, pipe, runCount)) {
+                n++;
+                runCount += gsDraws[n].count;
+                sMerged++;
+            }
+        }
         if (d->vu) {
-            SDL_DrawGPUIndexedPrimitives(pass, d->count, 1, d->first, 0, 0);
+            SDL_DrawGPUIndexedPrimitives(pass, runCount, 1, d->first, 0, 0);
         } else if (split) {
             /* inside the part read later with the byte, the rest of its scissor without: four bands around it */
             const int16_t *r = sAuxNeed[n];
@@ -1840,7 +1889,7 @@ static void vk_frame_end(void) {
             }
             haveScissor = 0;
         } else {
-            SDL_DrawGPUPrimitives(pass, d->count, 1, d->first, 0);
+            SDL_DrawGPUPrimitives(pass, runCount, 1, d->first, 0);
         }
     }
     if (pass != NULL) {
@@ -2076,10 +2125,12 @@ static void vk_frame_end(void) {
         if (++count == 60) {
             if (getenv("BT3_GS_VERBOSE") != NULL) {
                 fprintf(stderr, "time:   of ending the frame: uploads %.2f ms, issuing the draws %.2f, waiting for the screen's buffer %.2f, "
-                                "showing %.2f, handing over to the driver %.2f\n",
-                        (double)sum[0] / 60e6, (double)sum[1] / 60e6, (double)sum[2] / 60e6, (double)sum[3] / 60e6, (double)sum[4] / 60e6);
+                                "showing %.2f, handing over to the driver %.2f; draws joined %.0f a picture\n",
+                        (double)sum[0] / 60e6, (double)sum[1] / 60e6, (double)sum[2] / 60e6, (double)sum[3] / 60e6, (double)sum[4] / 60e6,
+                        (double)sMerged / 60.0);
             }
             count = 0;
+            sMerged = 0;
             memset(sum, 0, sizeof(sum));
         }
     }
