@@ -19,8 +19,8 @@ extern int gsScale;
 #define MAX_VERTS (1 << 20)
 #define MAX_DRAWS (1 << 16)
 #define MAX_TARGETS 24
-#define MAX_VU_VERTS (1 << 19)
-#define MAX_VU_IDX (1 << 20)
+#define MAX_VU_VERTS (1 << 20) /* (27 Nov 2026: twice, for the smooth models) */
+#define MAX_VU_IDX (1 << 22)
 #define MAX_VU_UNIFORMS 8192
 #define MAX_TEX 8192
 #define TEX_BUCKETS 32768 /* a power of two, four times MAX_TEX */

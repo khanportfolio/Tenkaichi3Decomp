@@ -28,6 +28,8 @@
 #include "menu_text.h"  /* editable labels in the original menu texture slots */
 #include "menu_labels.h"      /* European menu art and native language selector pictures */
 #include "mods.h"             /* the look script mods ask for (bt3.look) */
+#define XXH_INLINE_ALL
+#include "../../third_party/xxhash/xxhash.h" /* (smooth models: the key of a batch) */
 #include <math.h>
 
 /* Stage-name overlay: defined here (C) so both the renderer (gs_gpu.c) and the game's menu (menu_c_e.c) can
@@ -2679,6 +2681,239 @@ void GsGpu_DrawVu4(int ctx, const float *vertices, uint32_t count, const float *
 
 /* Vertex program 0 as a shader: one strip of the fighters' models (see shaders/vu0.vert and gs_vu1.c). The strip
    becomes a triangle list of the program's own 48-byte vertices; the constants go into a uniform block. */
+/* ------------------------------------------------------------------------------------------ smooth models */
+/* 27 Nov 2026 (the user: "increase the triangles at max level"): the fighters' models with many more triangles.
+   Every triangle of a batch is replaced by a curved PN triangle (Vlachos, Peters, Boyd, Oliveira 2001, "Curved PN
+   Triangles"): a cubic patch through its three corners, bent by their normals, cut into level x level smaller
+   triangles. Silhouettes, heads, limbs, hair and clothes come out round instead of faceted; texture coordinates,
+   bone weights and the authored normals are interpolated, so skinning, textures and the toon shading work as
+   before. The batch is in the model's own space (vu0.vert skins it), so its smoothed copy never changes and is
+   kept (sSb, by a hash of its vertices).
+   Cracks: two batches (or two sides of a hard edge) that share a corner with different normals would bend the
+   shared edge two ways. The bend uses each corner position's AVERAGE normal over every distinct normal seen there
+   (sNorm), the same on both sides, so edges meet. A batch is made again once when new normals were learnt
+   (sNormGen) after it was made.
+   Setting smooth_models (bt3_settings.txt; BT3_SMOOTH overrides): 1 off, 2..5 the cuts per edge (4 = 16 triangles
+   for each). Layers 0, 1, 5 (the fighters' layers) and 2 (their shadow silhouettes); 3 and 4 carry colours, not
+   normals. */
+#define SMOOTH_MAX 5
+#define SN_SIZE (1u << 17)
+#define SB_SIZE 8192u
+typedef struct SNorm { int32_t k[3]; int used, nn; float n[4][3]; } SNorm;
+typedef struct SmoothBatch { uint64_t key; uint32_t nv, ni; unsigned gen, used; float *v; uint32_t *idx; } SmoothBatch;
+static SNorm *sNorm;
+static unsigned sNormGen = 1;
+static SmoothBatch *sSb;
+
+static int smooth_level(void) {
+    static int lv = -1;
+    if (lv < 0) {
+        const char *e = getenv("BT3_SMOOTH");
+        lv = e != NULL ? atoi(e) : Port_Setting("smooth_models", 4);
+        lv = lv < 1 ? 1 : lv > SMOOTH_MAX ? SMOOTH_MAX : lv;
+        fprintf(stderr, "bt3: smooth models: level %d (%d triangles for each)\n", lv, lv * lv);
+    }
+    return lv;
+}
+
+static SNorm *snorm_slot(const float *p, int add) {
+    int32_t k[3];
+    uint32_t h, i;
+    for (i = 0; i < 3; i++) {
+        k[i] = (int32_t)lrintf(p[i] * 1024.0f);
+    }
+    h = (uint32_t)k[0] * 73856093u ^ (uint32_t)k[1] * 19349663u ^ (uint32_t)k[2] * 83492791u;
+    for (i = 0; i < 64; i++) {
+        SNorm *n = &sNorm[(h + i) & (SN_SIZE - 1)];
+        if (n->used && n->k[0] == k[0] && n->k[1] == k[1] && n->k[2] == k[2]) {
+            return n;
+        }
+        if (!n->used) {
+            if (!add) {
+                return NULL;
+            }
+            n->used = 1;
+            n->nn = 0;
+            memcpy(n->k, k, sizeof(k));
+            return n;
+        }
+    }
+    return NULL;
+}
+
+static void snorm_add(const float *p, const float *nrm) {
+    float l = sqrtf(nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]), u[3];
+    SNorm *n;
+    int j;
+    if (!(l > 1e-6f)) {
+        return;
+    }
+    n = snorm_slot(p, 1);
+    if (n == NULL) {
+        return;
+    }
+    u[0] = nrm[0] / l; u[1] = nrm[1] / l; u[2] = nrm[2] / l;
+    for (j = 0; j < n->nn; j++) {
+        if (n->n[j][0] * u[0] + n->n[j][1] * u[1] + n->n[j][2] * u[2] > 0.999f) {
+            return;
+        }
+    }
+    if (n->nn < 4) {
+        memcpy(n->n[n->nn++], u, sizeof(u));
+        sNormGen++;
+    }
+}
+
+static void snorm_get(const float *p, const float *nrm, float out[3]) {
+    const SNorm *n = snorm_slot(p, 0);
+    float l;
+    int j;
+    out[0] = out[1] = out[2] = 0.0f;
+    if (n != NULL) {
+        for (j = 0; j < n->nn; j++) {
+            out[0] += n->n[j][0]; out[1] += n->n[j][1]; out[2] += n->n[j][2];
+        }
+    }
+    if (n == NULL || n->nn == 0) {
+        out[0] = nrm[0]; out[1] = nrm[1]; out[2] = nrm[2];
+    }
+    l = sqrtf(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+    if (l > 1e-6f) {
+        out[0] /= l; out[1] /= l; out[2] /= l;
+    }
+}
+
+/* One batch (a strip of `count` vertices, 12 floats each) as smoothed triangles, or NULL. */
+static const SmoothBatch *smooth_batch(const float *vin, uint32_t count, int level) {
+    uint64_t key = XXH3_64bits(vin, (size_t)count * 48) ^ (uint64_t)level * 0x9E3779B97F4A7C15ull;
+    uint32_t slot = (uint32_t)key & (SB_SIZE - 1), i, j, pick = slot;
+    uint32_t per = (uint32_t)((level + 1) * (level + 2) / 2);
+    SmoothBatch *b = NULL;
+    float *v;
+    uint32_t *idx;
+
+    if (sNorm == NULL) {
+        sNorm = calloc(SN_SIZE, sizeof(SNorm));
+        sSb = calloc(SB_SIZE, sizeof(SmoothBatch));
+        if (sNorm == NULL || sSb == NULL) {
+            return NULL;
+        }
+    }
+    for (i = 0; i < 8; i++) {
+        SmoothBatch *c = &sSb[(slot + i) & (SB_SIZE - 1)];
+        if (c->v != NULL && c->key == key) {
+            b = c;
+            break;
+        }
+        if (c->v == NULL || c->used < sSb[pick].used) {
+            pick = (slot + i) & (SB_SIZE - 1);
+        }
+    }
+    if (b != NULL && b->gen == sNormGen) {
+        b->used = gGsFrame;
+        return b;
+    }
+    for (i = 0; i < count; i++) {
+        snorm_add(&vin[i * 12], &vin[i * 12 + 4]);
+    }
+    if (b == NULL) {
+        b = &sSb[pick];
+    }
+    free(b->v);
+    free(b->idx);
+    b->v = NULL;
+    b->idx = NULL;
+    b->key = key;
+    b->used = gGsFrame;
+    b->gen = sNormGen;
+    b->nv = b->ni = 0;
+    v = malloc((size_t)(count - 2) * per * 48);
+    idx = malloc((size_t)(count - 2) * (uint32_t)(level * level) * 3 * sizeof(uint32_t));
+    if (v == NULL || idx == NULL) {
+        free(v);
+        free(idx);
+        return NULL;
+    }
+    for (i = 0; i + 2 < count; i++) {
+        const float *c[3];
+        float P[3][3], N[3][3], e[3], f[3], cr[3], b210[3], b120[3], b021[3], b012[3], b102[3], b201[3], b111[3];
+        uint32_t base = b->nv, a, k;
+        c[0] = &vin[i * 12];
+        c[1] = &vin[(i + 1) * 12];
+        c[2] = &vin[(i + 2) * 12];
+        for (k = 0; k < 3; k++) {
+            memcpy(P[k], c[k], 12);
+            snorm_get(c[k], c[k] + 4, N[k]);
+        }
+        for (k = 0; k < 3; k++) {
+            e[k] = P[1][k] - P[0][k];
+            f[k] = P[2][k] - P[0][k];
+        }
+        cr[0] = e[1] * f[2] - e[2] * f[1]; cr[1] = e[2] * f[0] - e[0] * f[2]; cr[2] = e[0] * f[1] - e[1] * f[0];
+        if (cr[0] * cr[0] + cr[1] * cr[1] + cr[2] * cr[2] < 1e-14f) {
+            continue; /* (the strip's joins: triangles with no area) */
+        }
+#define PN_W(i_, j_) ((P[j_][0] - P[i_][0]) * N[i_][0] + (P[j_][1] - P[i_][1]) * N[i_][1] + (P[j_][2] - P[i_][2]) * N[i_][2])
+        {
+            float w01 = PN_W(0, 1), w10 = PN_W(1, 0), w12 = PN_W(1, 2), w21 = PN_W(2, 1), w20 = PN_W(2, 0), w02 = PN_W(0, 2);
+            for (k = 0; k < 3; k++) {
+                float E, V;
+                b210[k] = (2.0f * P[0][k] + P[1][k] - w01 * N[0][k]) / 3.0f;
+                b120[k] = (2.0f * P[1][k] + P[0][k] - w10 * N[1][k]) / 3.0f;
+                b021[k] = (2.0f * P[1][k] + P[2][k] - w12 * N[1][k]) / 3.0f;
+                b012[k] = (2.0f * P[2][k] + P[1][k] - w21 * N[2][k]) / 3.0f;
+                b102[k] = (2.0f * P[2][k] + P[0][k] - w20 * N[2][k]) / 3.0f;
+                b201[k] = (2.0f * P[0][k] + P[2][k] - w02 * N[0][k]) / 3.0f;
+                E = (b210[k] + b120[k] + b021[k] + b012[k] + b102[k] + b201[k]) / 6.0f;
+                V = (P[0][k] + P[1][k] + P[2][k]) / 3.0f;
+                b111[k] = E + (E - V) * 0.5f;
+            }
+        }
+#undef PN_W
+        /* the grid: row a (weight of corner 0 = a / level) has level + 1 - a vertices, j the weight of corner 1 */
+        for (a = 0; a <= (uint32_t)level; a++) {
+            for (j = 0; j + a <= (uint32_t)level; j++) {
+                float u = (float)a / level, w = (float)j / level, x = 1.0f - u - w, *o = &v[b->nv * 12];
+                float l0 = 0.0f, l1 = 0.0f;
+                for (k = 0; k < 3; k++) {
+                    o[k] = P[0][k] * u * u * u + P[1][k] * w * w * w + P[2][k] * x * x * x +
+                           3.0f * (b210[k] * u * u * w + b120[k] * u * w * w + b201[k] * u * u * x +
+                                   b021[k] * w * w * x + b102[k] * u * x * x + b012[k] * w * x * x) +
+                           6.0f * b111[k] * u * w * x;
+                    o[4 + k] = c[0][4 + k] * u + c[1][4 + k] * w + c[2][4 + k] * x; /* the authored normals */
+                    o[8 + k] = c[0][8 + k] * u + c[1][8 + k] * w + c[2][8 + k] * x; /* s, t, q */
+                    l0 += o[4 + k] * o[4 + k];
+                    l1 += (c[0][4 + k] * c[0][4 + k]) * u + (c[1][4 + k] * c[1][4 + k]) * w + (c[2][4 + k] * c[2][4 + k]) * x;
+                }
+                if (l0 > 1e-12f) { /* (back to the corners' length) */
+                    float r = sqrtf(l1 / l0);
+                    o[4] *= r; o[5] *= r; o[6] *= r;
+                }
+                o[3] = c[0][3] * u + c[1][3] * w + c[2][3] * x; /* the bone weight */
+                memcpy(&o[7], &c[0][7], 4);                      /* (flag words as the first corner's) */
+                memcpy(&o[11], &c[0][11], 4);
+                b->nv++;
+            }
+        }
+        for (a = 0; a < (uint32_t)level; a++) {
+            uint32_t r0 = base, r1;
+            for (k = 0; k < a; k++) {
+                r0 += (uint32_t)level + 1 - k;
+            }
+            r1 = r0 + (uint32_t)level + 1 - a;
+            for (j = 0; j + a < (uint32_t)level; j++) {
+                idx[b->ni++] = r0 + j; idx[b->ni++] = r1 + j; idx[b->ni++] = r0 + j + 1;
+                if (j + a + 1 < (uint32_t)level) {
+                    idx[b->ni++] = r1 + j; idx[b->ni++] = r1 + j + 1; idx[b->ni++] = r0 + j + 1;
+                }
+            }
+        }
+    }
+    b->v = v;
+    b->idx = idx;
+    return b;
+}
+
 void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, const float *consts) {
     if (GS_NO_PICTURE) { /* a frame that is only being re-run, or one that is skipped: nothing is drawn */
         return;
@@ -2720,6 +2955,30 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
     u.light2[0] = consts[41]; u.light2[1] = consts[45]; u.light2[2] = consts[49]; u.light2[3] = consts[53];
     d.vu = 1;
     d.first = gsVuIdxCount;
+    if ((layer == 0 || layer == 1 || layer == 2 || layer == 5) && smooth_level() > 1) {
+        /* smooth models: the batch's curved copy (made once, kept); within a frame its two layers share one upload */
+        static const SmoothBatch *lastB;
+        static uint32_t lastFirst, lastFrame = ~0u, lastVerts = ~0u;
+        static uint64_t lastKey;
+        const SmoothBatch *sb = smooth_batch(vertices, count, smooth_level());
+        if (sb != NULL && sb->nv != 0 && gsVuIdxCount + sb->ni <= MAX_VU_IDX) {
+            uint32_t at = ~0u;
+            if (sb == lastB && sb->key == lastKey && lastFrame == gGsFrame && lastVerts <= gsVuVertCount) {
+                at = lastFirst;
+            } else if (gsVuVertCount + sb->nv <= MAX_VU_VERTS) {
+                at = gsVuVertCount;
+                memcpy(&gsVuVerts[gsVuVertCount * 12], sb->v, (size_t)sb->nv * 48);
+                gsVuVertCount += sb->nv;
+                lastB = sb; lastKey = sb->key; lastFirst = at; lastFrame = gGsFrame; lastVerts = gsVuVertCount;
+            }
+            if (at != ~0u) {
+                for (i = 0; i < sb->ni; i++) {
+                    gsVuIdx[gsVuIdxCount++] = at + sb->idx[i];
+                }
+                goto added;
+            }
+        }
+    }
     for (i = 0; i + 2 < count; i++) { /* strip -> triangles */
         if (layer == 4) { /* debris: a flagged vertex does not complete a triangle */
             uint32_t flag;
@@ -2732,9 +2991,10 @@ void GsGpu_DrawVu0(int layer, int ctx, const float *vertices, uint32_t count, co
             gsVuIdx[gsVuIdxCount++] = gsVuVertCount + i + k;
         }
     }
-    d.count = gsVuIdxCount - d.first;
     memcpy(&gsVuVerts[gsVuVertCount * 12], vertices, count * 48);
     gsVuVertCount += count;
+added:
+    d.count = gsVuIdxCount - d.first;
     gsTargets[d.target].draws++;
     gsTargets[d.target].gen = gGsPageGen[gsTargets[d.target].fbp & 511];
     u.target[0] = lowres_now(d.target) ? (float)SCALE : 1.0f; /* (a work buffer at the PS2's resolution: target_lowres) */
