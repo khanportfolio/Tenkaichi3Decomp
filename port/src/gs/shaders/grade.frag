@@ -167,8 +167,8 @@ void main() {
         // cinematic glow (28 Nov 2026): what is brighter than the threshold (bright.frag) spread wide in four sizes,
         // the near ones strongest, laid over like light on film (a screen blend: never past white)
         float b0 = p.z1.z;
-        vec3 bl = glow_at(vUv, b0 + 1.0) * 0.30 + glow_at(vUv, b0 + 2.0) * 0.30 + glow_at(vUv, b0 + 3.0) * 0.24 +
-                  glow_at(vUv, b0 + 4.0) * 0.16;
+        vec3 bl = glow_at(vUv, b0 + 1.0) * 0.20 + glow_at(vUv, b0 + 2.0) * 0.28 + glow_at(vUv, b0 + 3.0) * 0.28 +
+                  glow_at(vUv, b0 + 4.0) * 0.24;
         bl = clamp(bl * p.z1.y, 0.0, 1.0);
         c = 1.0 - (1.0 - clamp(c, 0.0, 1.0)) * (1.0 - bl);
     }

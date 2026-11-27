@@ -3121,7 +3121,7 @@ static void grade_add(void) {
         unsigned sc = lk->sun_color != 0 ? lk->sun_color : 0xFFF0D2FFu;
         bloom = bloom < 0 ? 0 : bloom > 200 ? 200 : bloom;
         gsGradeFx[0] = bloom / 100.0f * 1.4f;                      /* strength */
-        gsGradeFx[1] = 0.70f;                                      /* threshold */
+        gsGradeFx[1] = 0.62f;                                      /* threshold (of whiteness) */
         gsGradeFx[2] = Port_Setting("sun_rays", 1) ? lk->sun_rays / 100.0f : 0.0f;
         gsGradeFx[3] = (lk->sun_set ? lk->sun_x : 62) / 100.0f;    /* (of the picture) */
         gsGradeFx[4] = (lk->sun_set ? lk->sun_y : -10) / 100.0f;
