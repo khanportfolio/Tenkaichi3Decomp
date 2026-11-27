@@ -1247,6 +1247,7 @@ void Mm_PairUpdate(s32 want0, s32 want1, s32 filesFree) {
    thousand of the frame the bones fill, 900; hair and raised arms go past them), sel3d_turn1 / sel3d_turn2 (how far
    each side is turned to the other, hundredths of a radian: 15 and 45). */
 extern void *BtlObj_GetNode(void *obj, s32 node);
+extern void *BtlObjPoolE0_Get(void); /* btl_obj.c: the 512 bones (0xE0 bytes each) every model's bones come from */
 extern void Port_Sel3dLog(int side, int chara, int bones, int hMilli, int footMilli, int baseMilli); /* plat_charas.c (no stdio.h here: the Mac build refused it; whole numbers: the game's code passes floats its own way) */
 
 
@@ -1262,9 +1263,13 @@ static void Mp_Measure(MpFit *f, s32 chara, s32 side) {
 
     for (i = 0; i < 0xA9; i++) {
         u8 *node = (u8 *)BtlObj_GetNode(f->obj, i);
+        u8 *pool = (u8 *)BtlObjPoolE0_Get();
         f32 y;
 
-        if (node == NULL) {
+        /* (27 Nov 2026) only a real bone: a model fills the slots of the bones it has and the game never reads the
+           others, so they keep whatever the memory held (a leftover 0x4044332E crashed every fight's start, with
+           the select screen's models measured, once the program's layout moved) */
+        if (node == NULL || node < pool || node >= pool + 512 * 0xE0 || (u32)(node - pool) % 0xE0 != 0) {
             continue;
         }
         y = *(f32 *)(node + 0x44) - y0; /* (from the model's own place) */
