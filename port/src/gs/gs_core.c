@@ -1183,6 +1183,10 @@ static void run_frozen(void);
 static void walk_chain(uint32_t tadr, int tte, void (*block)(const uint32_t *tag, const uint32_t *data, uint32_t qwc, int tte));
 static void freeze_block(const uint32_t *tag, const uint32_t *data, uint32_t qwc, int tte);
 static size_t sFrozenUsed; /* (the copy of a frame's list for the render thread: freeze_block) */
+static void gifq_add(const void *p, uint32_t qwc); /* (the GIF channel's queue for the render thread) */
+static void gifq_run(int q);
+static int sGifFill, sGifRun = -1;
+static size_t sGifQUsed[2];
 
 /* BT3_GS_RACE=1 (with the render thread): finds data of a frame's list that the game changes while the list is
    being drawn. The list's blocks are hashed when the game hands the list over and again when the drawing is
@@ -1276,6 +1280,9 @@ static void *render_thread(void *arg) {
                 extern void GsGpu_InterpHurry(int on);
                 GsGpu_InterpHurry(0);
             }
+            if (sGifRun >= 0) {
+                gifq_run(sGifRun); /* what the game sent on the GIF channel before handing this list over */
+            }
             run_frozen();
             pthread_mutex_lock(&sLock);
             sListDone = 1;
@@ -1352,10 +1359,16 @@ int Gs_OnRenderThread(void) {
 void Gs_RenderIdle(void) {
     if (sThreaded && !pthread_equal(pthread_self(), sThread)) { /* (on the render thread itself: it is the one running) */
         render_wait();
+        gifq_run(sGifFill); /* the GIF transfers queued since the last list, now, before the caller looks */
     }
 }
 
 static void render_post(int job, uint32_t tadr, int tte) {
+    if (job == 2) { /* (the thread is idle: its queue and the game's change places) */
+        sGifRun = sGifFill;
+        sGifFill ^= 1;
+        sGifQUsed[sGifFill] = 0;
+    }
     pthread_mutex_lock(&sLock);
     sJob = job;
     sListDone = 0;
@@ -1462,6 +1475,10 @@ static int gs_on(void) {
     return on;
 }
 
+static void gif_now(const void *p, uint32_t qwc) {
+    Gs_Gif((const uint8_t *)p, qwc);
+}
+
 /* A transfer on the GIF channel itself (the game uses it for texture uploads outside the frame's list):
    `qwc` quadwords of GIF data at `addr`, or with chain = 1 a source chain of them starting at `addr`. */
 void Port_GsGifChannel(uint32_t addr, uint32_t qwc, int chain) {
@@ -1470,11 +1487,10 @@ void Port_GsGifChannel(uint32_t addr, uint32_t qwc, int chain) {
     if (!gs_on()) {
         return;
     }
-    if (sThreaded) {
-        render_wait(); /* the GS is one device: this transfer goes after the list that is being drawn */
-    }
+    /* with the render thread: queued for it, after the list it is drawing (gifq_add) */
+    void (*send)(const void *, uint32_t) = sThreaded && !pthread_equal(pthread_self(), sThread) ? gifq_add : gif_now;
     if (!chain) {
-        Gs_Gif((const uint8_t *)Port_Ptr(addr), qwc);
+        send(Port_Ptr(addr), qwc);
         return;
     }
     for (guard = 0; guard < 100000; guard++) {
@@ -1482,10 +1498,10 @@ void Port_GsGifChannel(uint32_t addr, uint32_t qwc, int chain) {
         uint32_t n = tag[0] & 0xFFFF, id = (tag[0] >> 28) & 7, ref = tag[1];
 
         if (id == 0 || id == 3 || id == 4) {
-            Gs_Gif((const uint8_t *)Port_Ptr(ref), n);
+            send(Port_Ptr(ref), n);
             addr += 16;
         } else {
-            Gs_Gif((const uint8_t *)(tag + 4), n);
+            send(tag + 4, n);
             addr = id == 2 ? ref : addr + 16 + n * 16;
         }
         if (id == 0 || id == 7) {
@@ -1628,6 +1644,68 @@ static void freeze_block(const uint32_t *tag, const uint32_t *data, uint32_t qwc
     memcpy(o + 2, tag, 16);
     memcpy(o + 6, data, (size_t)qwc * 16);
     sFrozenUsed += need;
+}
+
+/* (28 Nov 2026) With the render thread, what the game sends on the GIF channel during its tick (the buffer swap's
+   draw environment, texture uploads) is copied into a queue that the render thread runs at the start of the next
+   list: the same order as before, but the game no longer stands still meanwhile. It used to wait for the render
+   thread at each of them, and the thread's job lasts until Smooth motion's last picture is due (about 17 ms after
+   the hand-over): measured, the game's 10 ms of work took 25 ms with the second core. The frame's buffer number
+   (sceGsSwapDBuff) goes through the queue too, so the frame being drawn always reads its own (the flicker of
+   chars43d). Two queues: the game fills one while the render thread runs the other; they change places at the
+   hand-over, when the thread is idle. Each entry: kind (0 GIF data, 1 the frame's buffer), count, then the data. */
+static uint32_t *sGifQ[2];
+static size_t sGifQSize[2];
+
+static uint32_t *gifq_room(size_t words) {
+    int q = sGifFill;
+    uint32_t *o;
+    if (sGifQUsed[q] + words > sGifQSize[q]) {
+        size_t size = sGifQSize[q] ? sGifQSize[q] * 2 : (size_t)1 << 16;
+        while (size < sGifQUsed[q] + words) {
+            size *= 2;
+        }
+        sGifQ[q] = realloc(sGifQ[q], size * sizeof(uint32_t));
+        sGifQSize[q] = size;
+    }
+    o = sGifQ[q] + sGifQUsed[q];
+    sGifQUsed[q] += words;
+    return o;
+}
+
+static void gifq_add(const void *p, uint32_t qwc) {
+    uint32_t *o = gifq_room(2 + (size_t)qwc * 4);
+    o[0] = 0;
+    o[1] = qwc;
+    memcpy(o + 2, p, (size_t)qwc * 16);
+}
+
+static void gifq_run(int q) {
+    size_t at = 0;
+    extern int gGsMainFbp;
+    while (at < sGifQUsed[q]) {
+        const uint32_t *b = sGifQ[q] + at;
+        if (b[0] == 1) {
+            gGsMainFbp = (int)b[1];
+            at += 2;
+        } else {
+            Gs_Gif((const uint8_t *)(b + 2), b[1]);
+            at += 2 + (size_t)b[1] * 4;
+        }
+    }
+    sGifQUsed[q] = 0;
+}
+
+/* sceGsSwapDBuff (gs_sony.c): the buffer the frame about to be drawn goes into. */
+void Gs_SetMainFbp(int fbp) {
+    extern int gGsMainFbp;
+    if (sThreaded && !pthread_equal(pthread_self(), sThread)) {
+        uint32_t *o = gifq_room(2);
+        o[0] = 1;
+        o[1] = (uint32_t)fbp;
+    } else {
+        gGsMainFbp = fbp;
+    }
 }
 
 static void run_frozen(void) {
